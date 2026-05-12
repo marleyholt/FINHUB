@@ -33,9 +33,9 @@
         } from "https://esm.sh/lucide-react@0.263.1";
 
         // --- FIREBASE IMPORTS ---
-        import { initializeApp } from "https://esm.sh/firebase@10.8.0/app";
-        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, updateProfile, updatePassword } from "https://esm.sh/firebase@10.8.0/auth";
-        import { getFirestore, collection, doc, setDoc, onSnapshot, deleteDoc, updateDoc, writeBatch } from "https://esm.sh/firebase@10.8.0/firestore";
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, updateProfile, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, onSnapshot, deleteDoc, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // --- FIREBASE CONFIGURATION (Suas Chaves) ---
         const firebaseConfig = {
