@@ -30,7 +30,7 @@
             LayoutDashboard, TrendingDown, TrendingUp, DollarSign,
             PieChart, Target, LogOut, Lock, Calendar, ListPlus,
             Tag, Trash2, Edit2, Plus, Settings, User as UserIcon, Key, Loader2,
-            BarChart3, Wallet
+            BarChart3, Wallet, Activity
         } from "https://esm.sh/lucide-react@0.263.1";
 
         // --- FIREBASE IMPORTS ---
@@ -38,7 +38,7 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, updateProfile, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, onSnapshot, deleteDoc, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // --- FIREBASE CONFIGURATION (Suas Chaves) ---
+        // --- FIREBASE CONFIGURATION ---
         const firebaseConfig = {
             apiKey: "AIzaSyAWsiRWFynuzmmVWtijPPugnZiA27Kus5I",
             authDomain: "finlhub.firebaseapp.com",
@@ -90,7 +90,6 @@
                 e.preventDefault();
                 setLoading(true);
                 setError('');
-                
                 try {
                     if (isLogin) {
                         await signInWithEmailAndPassword(auth, formData.email, formData.password);
@@ -99,18 +98,14 @@
                         try {
                             await updateProfile(userCredential.user, { displayName: formData.name });
                             await setDoc(doc(db, 'users', userCredential.user.uid, 'settings', 'categories'), { list: INITIAL_CATEGORIES });
-                        } catch (firestoreErr) {
-                            console.error("Aviso: Utilizador criado, mas falhou ao guardar definições no Firestore:", firestoreErr);
-                        }
+                        } catch (firestoreErr) {}
                     }
                 } catch (err) {
-                    console.error("Erro detalhado do Firebase:", err);
                     let msgErro = "Erro desconhecido: " + err.message;
                     if (err.code === 'auth/email-already-in-use') msgErro = 'Este e-mail já está registado. Tente iniciar sessão.';
                     else if (err.code === 'auth/invalid-credential') msgErro = 'Palavra-passe incorreta ou e-mail não encontrado.';
                     else if (err.code === 'auth/weak-password') msgErro = 'A palavra-passe é muito fraca (mínimo de 6 caracteres).';
-                    else if (err.code === 'auth/operation-not-allowed') msgErro = 'Autenticação por E-mail/Palavra-passe não está ativada no painel do Firebase!';
-                    else if (err.code === 'auth/network-request-failed') msgErro = 'Erro de rede. Verifique a sua ligação à internet.';
+                    else if (err.code === 'auth/operation-not-allowed') msgErro = 'Autenticação por E-mail/Palavra-passe não está ativada!';
                     setError(msgErro);
                 } finally {
                     setLoading(false);
@@ -186,7 +181,7 @@
                     setMsg({ text: 'Perfil atualizado com sucesso!', type: 'success' });
                     setTimeout(() => setMsg({text: '', type: ''}), 3000);
                 } catch (error) {
-                    setMsg({ text: 'Erro ao atualizar. Se alterou a senha, certifique-se de que tem pelo menos 6 caracteres ou tente refazer o login.', type: 'error' });
+                    setMsg({ text: 'Erro ao atualizar. Verifique se a senha tem 6 caracteres.', type: 'error' });
                 }
             };
 
@@ -252,7 +247,7 @@
                 return { period, inc, exp, balance, acc: runningTotal };
             });
 
-            if (chartData.length === 0 || transactions.length === 0) return <div className="text-zinc-500 text-sm mt-4 text-center py-6 border border-dashed border-zinc-800 rounded-lg">Adicione meses e lançamentos para ver a projeção visual.</div>;
+            if (chartData.length === 0 || transactions.length === 0) return <div className="text-zinc-500 text-sm mt-4 text-center py-6 border border-dashed border-zinc-800 rounded-lg">Sem dados suficientes para a projeção visual.</div>;
 
             const maxBarValue = Math.max(...chartData.map(d => Math.max(d.inc, d.exp)), 100);
             const height = 200;
@@ -308,16 +303,9 @@
             );
         };
 
-        // --- COMPONENTE GESTOR DE TRANSAÇÕES (REUTILIZÁVEL PARA ORÇAMENTO E REAIS) ---
+        // --- COMPONENTE GESTOR DE TRANSAÇÕES (ORÇAMENTO E REAIS) ---
         const TransactionManager = ({ 
-            user, 
-            transactions, 
-            expenseCategories,
-            collectionName,
-            title,
-            subtitle,
-            typeLabel,
-            newLabel
+            user, transactions, expenseCategories, collectionName, title, subtitle, typeLabel, newLabel
         }) => {
             const currentYearMonth = new Date().toISOString().slice(0, 7);
             const availablePeriods = useMemo(() => {
@@ -330,30 +318,21 @@
             const incomeCategories = ['Salário', 'Fonte diversa'];
 
             const defaultForm = { 
-                type: 'expense', 
-                description: '', 
-                amount: '', 
-                category: expenseCategories[0] || 'Outros', 
-                isInstallment: false, 
-                installmentsCount: 2,
-                isRecurring: false,
-                recurringEndPeriod: ''
+                type: 'expense', description: '', amount: '', category: expenseCategories[0] || 'Outros', 
+                isInstallment: false, installmentsCount: 2, isRecurring: false, recurringEndPeriod: ''
             };
             const [formData, setFormData] = useState(defaultForm);
 
             const activeCategoryList = formData.type === 'income' ? incomeCategories : expenseCategories;
             const currentMonthTransactions = useMemo(() => transactions.filter(p => p.period === selectedPeriod), [transactions, selectedPeriod]);
 
-            // --- Cálculos Mensais ---
+            // --- Cálculos ---
             const totalExpense = currentMonthTransactions.reduce((acc, curr) => curr.type === 'expense' ? acc + curr.amount : acc, 0);
             const totalIncome = currentMonthTransactions.reduce((acc, curr) => curr.type === 'income' ? acc + curr.amount : acc, 0);
             const balance = totalIncome - totalExpense;
 
-            // --- Cálculos Anuais (Baseado no ano do mês selecionado) ---
             const currentYear = selectedPeriod.split('-')[0];
-            const currentYearTransactions = useMemo(() => {
-                return transactions.filter(p => p.period.startsWith(currentYear));
-            }, [transactions, currentYear]);
+            const currentYearTransactions = useMemo(() => transactions.filter(p => p.period.startsWith(currentYear)), [transactions, currentYear]);
 
             const annualIncome = currentYearTransactions.reduce((acc, curr) => curr.type === 'income' ? acc + curr.amount : acc, 0);
             const annualExpense = currentYearTransactions.reduce((acc, curr) => curr.type === 'expense' ? acc + curr.amount : acc, 0);
@@ -362,23 +341,17 @@
             const annualExpensesByCategory = useMemo(() => {
                 const categories = currentYearTransactions
                     .filter(p => p.type === 'expense')
-                    .reduce((acc, curr) => {
-                        acc[curr.category] = (acc[curr.category] || 0) + curr.amount;
-                        return acc;
-                    }, {});
+                    .reduce((acc, curr) => { acc[curr.category] = (acc[curr.category] || 0) + curr.amount; return acc; }, {});
                 return Object.entries(categories).sort((a, b) => b[1] - a[1]);
             }, [currentYearTransactions]);
 
             useEffect(() => {
-                if (!availablePeriods.includes(selectedPeriod)) {
-                    setSelectedPeriod(availablePeriods[0] || currentYearMonth);
-                }
+                if (!availablePeriods.includes(selectedPeriod)) setSelectedPeriod(availablePeriods[0] || currentYearMonth);
             }, [availablePeriods]);
 
             const handleAddMonth = () => {
                 const lastPeriod = availablePeriods[availablePeriods.length - 1] || currentYearMonth;
-                const nextPeriod = addMonthsToPeriod(lastPeriod, 1);
-                setSelectedPeriod(nextPeriod);
+                setSelectedPeriod(addMonthsToPeriod(lastPeriod, 1));
             };
 
             const handleTypeChange = (newType) => setFormData({...formData, type: newType, category: newType === 'income' ? incomeCategories[0] : (expenseCategories[0] || 'Outros')});
@@ -392,12 +365,8 @@
             };
 
             const handleDelete = async (id) => {
-                try {
-                    await deleteDoc(doc(db, 'users', user.uid, collectionName, id));
-                } catch(e) {
-                    console.error("Erro ao apagar:", e);
-                    alert("Erro ao apagar lançamento. Verifique as regras do Firestore.");
-                }
+                try { await deleteDoc(doc(db, 'users', user.uid, collectionName, id)); } 
+                catch(e) { alert("Erro ao apagar lançamento."); }
             };
 
             const handleSubmit = async (e) => {
@@ -412,27 +381,20 @@
                         });
                         setEditingId(null);
                         setFormData(defaultForm);
-                    } catch (err) {
-                        console.error("Erro ao atualizar:", err);
-                        alert("Erro ao atualizar lançamento. Verifique permissões.");
-                    }
+                    } catch (err) { alert("Erro ao atualizar."); }
                     return;
                 }
 
                 try {
                     const batch = writeBatch(db);
                     
-                    // Lógica para Despesa/Receita Recorrente
                     if (formData.isRecurring) {
                         if (!formData.recurringEndPeriod || formData.recurringEndPeriod < selectedPeriod) {
-                            alert("Por favor, selecione um mês final válido para o lançamento recorrente (igual ou posterior ao mês selecionado).");
-                            return;
+                            alert("Selecione um mês final válido."); return;
                         }
-                        
                         let currentIter = selectedPeriod;
                         let iterCount = 0;
-                        
-                        while (currentIter <= formData.recurringEndPeriod && iterCount < 120) { // Trava de segurança: max 10 anos
+                        while (currentIter <= formData.recurringEndPeriod && iterCount < 120) {
                             const newId = Date.now().toString() + iterCount;
                             const docRef = doc(db, 'users', user.uid, collectionName, newId);
                             batch.set(docRef, {
@@ -444,20 +406,26 @@
                         }
                         await batch.commit();
 
-                    // Lógica para Compra Parcelada
                     } else if (formData.isInstallment && formData.installmentsCount > 1 && formData.type === 'expense') {
+                        // LÓGICA DE ESPELHAMENTO: Se for orçamento (plannedTransactions), copia para as reais (actualTransactions)
                         for (let i = 0; i < formData.installmentsCount; i++) {
                             const targetPeriod = addMonthsToPeriod(selectedPeriod, i);
                             const newId = Date.now().toString() + i;
-                            const docRef = doc(db, 'users', user.uid, collectionName, newId);
-                            batch.set(docRef, {
+                            const dataObj = {
                                 type: formData.type, category: formData.category, amount: baseAmount, period: targetPeriod,
                                 description: `${formData.description} (${i + 1}/${formData.installmentsCount})`, isInstallment: true
-                            });
+                            };
+                            
+                            // Grava no Orçamento ou nas Reais (dependendo de onde o user está)
+                            batch.set(doc(db, 'users', user.uid, collectionName, newId), dataObj);
+                            
+                            // O SEGREDO: Se estivermos no Orçamento, espelha para as Reais!
+                            if (collectionName === 'plannedTransactions') {
+                                batch.set(doc(db, 'users', user.uid, 'actualTransactions', newId), dataObj);
+                            }
                         }
                         await batch.commit();
 
-                    // Lógica para Lançamento Único
                     } else {
                         const newId = Date.now().toString();
                         await setDoc(doc(db, 'users', user.uid, collectionName, newId), {
@@ -466,32 +434,24 @@
                     }
                     
                     setFormData(defaultForm);
-                } catch (err) {
-                    console.error("Erro ao gravar novo lançamento:", err);
-                    alert("Erro ao guardar. Verifique se a sua base de dados Firestore está ativa e com as regras corretas.");
-                }
+                } catch (err) { alert("Erro ao guardar dados no Firestore."); }
             };
 
             return (
                 <div className="space-y-6 pb-24 md:pb-0">
-                    
-                    {/* Título Principal */}
                     <div>
                         <h2 className="text-2xl font-bold text-white mb-1">{title}</h2>
                         <p className="text-zinc-400 text-sm">{subtitle}</p>
                     </div>
 
-                    {/* --- VISÃO GERAL DO ANO --- */}
                     <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-64 h-64 bg-green-500/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none"></div>
-                        
                         <div className="flex items-center mb-6">
                             <PieChart size={24} className="text-blue-500 mr-3" />
                             <h3 className="text-xl font-bold text-white">Resumo Anual ({currentYear})</h3>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10">
-                            {/* Totais do Ano */}
                             <div className="space-y-4">
                                 <div className="bg-black/50 border border-zinc-800/80 p-4 rounded-xl flex justify-between items-center backdrop-blur-sm">
                                     <span className="text-sm font-medium text-zinc-400">Receitas Acumuladas</span>
@@ -506,16 +466,10 @@
                                     <span className={`text-2xl font-black ${annualBalance >= 0 ? 'text-blue-400' : 'text-red-400'}`}>R$ {annualBalance.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
                                 </div>
                             </div>
-
-                            {/* Projeção por Categoria */}
                             <div>
-                                <h4 className="text-xs font-bold text-zinc-500 mb-4 uppercase tracking-wider flex items-center">
-                                    <BarChart3 size={14} className="mr-2" /> {typeLabel === 'Previstas' ? 'Projeção' : 'Distribuição'} de Despesas por Categoria
-                                </h4>
+                                <h4 className="text-xs font-bold text-zinc-500 mb-4 uppercase tracking-wider flex items-center"><BarChart3 size={14} className="mr-2" /> {typeLabel === 'Previstas' ? 'Projeção' : 'Distribuição'} de Despesas</h4>
                                 <div className="space-y-4 max-h-[220px] overflow-y-auto custom-scrollbar pr-3">
-                                    {annualExpensesByCategory.length === 0 ? (
-                                        <p className="text-sm text-zinc-500 text-center py-4 border border-dashed border-zinc-800 rounded-lg">Nenhuma despesa registada neste ano.</p>
-                                    ) : (
+                                    {annualExpensesByCategory.length === 0 ? <p className="text-sm text-zinc-500 text-center py-4 border border-dashed border-zinc-800 rounded-lg">Nenhuma despesa registada neste ano.</p> : (
                                         annualExpensesByCategory.map(([cat, amount]) => {
                                             const percentage = annualExpense > 0 ? (amount / annualExpense) * 100 : 0;
                                             return (
@@ -536,10 +490,9 @@
                         </div>
                     </div>
 
-                    {/* --- GRÁFICO LINEAR DE EVOLUÇÃO (Mês a Mês) --- */}
+                    {/* Gráfico Linear logo abaixo do Resumo Anual */}
                     <TransactionChart transactions={transactions} availablePeriods={availablePeriods} />
 
-                    {/* --- CONTROLOS MENSAIS E FILTROS --- */}
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-zinc-900 border border-zinc-800 p-4 rounded-xl mt-6">
                         <div>
                             <h3 className="text-lg font-bold text-white mb-1">Lançamentos Mensais</h3>
@@ -548,7 +501,7 @@
                         <div className="flex items-center space-x-2">
                             <div className="flex items-center space-x-2 bg-black border border-zinc-800 rounded-lg p-1">
                                 <Calendar size={18} className="text-zinc-400 ml-2" />
-                                <select className="bg-transparent text-green p-2 outline-none font-medium" value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)}>
+                                <select className="bg-transparent text-white p-2 outline-none font-medium" value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)}>
                                     {availablePeriods.includes(selectedPeriod) ? null : <option value={selectedPeriod}>{formatPeriodLabel(selectedPeriod)}</option>}
                                     {availablePeriods.map(p => <option key={p} value={p}>{formatPeriodLabel(p)} ({p})</option>)}
                                 </select>
@@ -559,9 +512,7 @@
                         </div>
                     </div>
 
-                    {/* --- CONTEÚDO MENSAL (Formulário e Detalhes) --- */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* Formulário de Input */}
                         <div className="lg:col-span-1 bg-zinc-900 border border-zinc-800 p-6 rounded-xl h-fit">
                             <h3 className="text-white font-medium mb-4 flex items-center">
                                 {editingId ? <Edit2 size={18} className="mr-2 text-blue-500"/> : <ListPlus size={18} className="mr-2 text-green-500"/>}
@@ -594,39 +545,26 @@
 
                                 {!editingId && (
                                     <div className="pt-2 space-y-3 border-t border-zinc-800 mt-4">
-                                        
-                                        {/* Compra Parcelada - Apenas para despesas */}
                                         {formData.type === 'expense' && (
                                             <label className="flex items-center space-x-2 text-sm text-zinc-300 cursor-pointer">
-                                                <input type="checkbox" className="rounded bg-zinc-800 border-zinc-700 text-green-500 focus:ring-green-500" 
-                                                    checked={formData.isInstallment} 
-                                                    onChange={e => setFormData({...formData, isInstallment: e.target.checked, isRecurring: false})} />
+                                                <input type="checkbox" className="rounded bg-zinc-800 border-zinc-700 text-green-500 focus:ring-green-500" checked={formData.isInstallment} onChange={e => setFormData({...formData, isInstallment: e.target.checked, isRecurring: false})} />
                                                 <span>Compra parcelada?</span>
                                             </label>
                                         )}
-                                        
                                         {formData.isInstallment && formData.type === 'expense' && (
                                             <div className="bg-black p-3 rounded-lg border border-zinc-800 mt-2">
                                                 <label className="block text-xs text-zinc-400 mb-1">Quantidade de Meses</label>
                                                 <input type="number" min="2" max="48" className="w-full bg-zinc-900 border border-zinc-700 text-white rounded-lg p-2 text-sm outline-none" value={formData.installmentsCount} onChange={e => setFormData({...formData, installmentsCount: parseInt(e.target.value)})} />
                                             </div>
                                         )}
-
-                                        {/* Lançamento Recorrente - Despesas ou Receitas */}
                                         <label className="flex items-center space-x-2 text-sm text-zinc-300 cursor-pointer">
-                                            <input type="checkbox" className="rounded bg-zinc-800 border-zinc-700 text-green-500 focus:ring-green-500" 
-                                                checked={formData.isRecurring} 
-                                                onChange={e => setFormData({...formData, isRecurring: e.target.checked, isInstallment: false, recurringEndPeriod: formData.recurringEndPeriod || addMonthsToPeriod(selectedPeriod, 11)})} />
-                                            <span>Lançamento recorrente? (Ex: Aluguel)</span>
+                                            <input type="checkbox" className="rounded bg-zinc-800 border-zinc-700 text-green-500 focus:ring-green-500" checked={formData.isRecurring} onChange={e => setFormData({...formData, isRecurring: e.target.checked, isInstallment: false, recurringEndPeriod: formData.recurringEndPeriod || addMonthsToPeriod(selectedPeriod, 11)})} />
+                                            <span>Lançamento recorrente?</span>
                                         </label>
-
                                         {formData.isRecurring && (
                                             <div className="bg-black p-3 rounded-lg border border-zinc-800 mt-2">
                                                 <label className="block text-xs text-zinc-400 mb-1">Repetir até qual mês?</label>
-                                                <input type="month" required className="w-full bg-zinc-900 border border-zinc-700 text-white rounded-lg p-2 text-sm outline-none focus:border-green-500" 
-                                                    value={formData.recurringEndPeriod} 
-                                                    min={selectedPeriod}
-                                                    onChange={e => setFormData({...formData, recurringEndPeriod: e.target.value})} />
+                                                <input type="month" required className="w-full bg-zinc-900 border border-zinc-700 text-white rounded-lg p-2 text-sm outline-none focus:border-green-500" value={formData.recurringEndPeriod} min={selectedPeriod} onChange={e => setFormData({...formData, recurringEndPeriod: e.target.value})} />
                                             </div>
                                         )}
                                     </div>
@@ -641,7 +579,6 @@
                             </form>
                         </div>
 
-                        {/* Detalhes do Mês */}
                         <div className="lg:col-span-2 space-y-4">
                             <div className="grid grid-cols-3 gap-4">
                                 <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
@@ -674,6 +611,7 @@
                                                         <p className="text-sm font-medium text-white">
                                                             {item.description}
                                                             {item.isRecurring && <span className="ml-2 text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">Recorrente</span>}
+                                                            {item.isInstallment && <span className="ml-2 text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded">Parcelado</span>}
                                                         </p>
                                                         <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{item.category}</p>
                                                     </div>
@@ -694,23 +632,151 @@
                             </div>
                         </div>
                     </div>
-                    
                 </div>
             );
         };
+
+        // --- NOVA ABA: DASHBOARD DE COMPARAÇÃO (PREVISTO VS REAL) ---
+        const ComparisonDashboard = ({ plannedTransactions, actualTransactions, expenseCategories }) => {
+            const currentYearMonth = new Date().toISOString().slice(0, 7);
+            
+            // Consolidar todos os períodos existentes em ambas as bases de dados
+            const availablePeriods = useMemo(() => {
+                const periods = new Set([currentYearMonth, ...plannedTransactions.map(p => p.period), ...actualTransactions.map(a => a.period)]);
+                return Array.from(periods).sort();
+            }, [plannedTransactions, actualTransactions]);
+
+            const [selectedPeriod, setSelectedPeriod] = useState(currentYearMonth);
+
+            // Filtrar os dados para o mês selecionado
+            const plannedMonth = useMemo(() => plannedTransactions.filter(p => p.period === selectedPeriod), [plannedTransactions, selectedPeriod]);
+            const actualMonth = useMemo(() => actualTransactions.filter(a => a.period === selectedPeriod), [actualTransactions, selectedPeriod]);
+
+            // Totais
+            const pInc = plannedMonth.filter(t => t.type === 'income').reduce((a,b) => a+b.amount, 0);
+            const pExp = plannedMonth.filter(t => t.type === 'expense').reduce((a,b) => a+b.amount, 0);
+            const pBal = pInc - pExp;
+
+            const aInc = actualMonth.filter(t => t.type === 'income').reduce((a,b) => a+b.amount, 0);
+            const aExp = actualMonth.filter(t => t.type === 'expense').reduce((a,b) => a+b.amount, 0);
+            const aBal = aInc - aExp;
+
+            // Agrupamento por Categorias para Barras de Comparação (Apenas Despesas)
+            const categoryComparison = useMemo(() => {
+                return expenseCategories.map(cat => {
+                    const pCat = plannedMonth.filter(t => t.type === 'expense' && t.category === cat).reduce((a,b) => a+b.amount, 0);
+                    const aCat = actualMonth.filter(t => t.type === 'expense' && t.category === cat).reduce((a,b) => a+b.amount, 0);
+                    return { cat, planned: pCat, actual: aCat };
+                }).filter(item => item.planned > 0 || item.actual > 0); // Ocultar categorias vazias em ambos
+            }, [plannedMonth, actualMonth, expenseCategories]);
+
+            return (
+                <div className="space-y-6 pb-24 md:pb-0">
+                    <div>
+                        <h2 className="text-2xl font-bold text-white mb-1">Visão Geral</h2>
+                        <p className="text-zinc-400 text-sm">Compare o seu Orçamento Previsto com os Gastos Reais do mês.</p>
+                    </div>
+
+                    <div className="flex items-center space-x-2 bg-zinc-900 border border-zinc-800 p-4 rounded-xl w-fit">
+                        <Calendar size={18} className="text-zinc-400" />
+                        <select className="bg-transparent text-white p-1 outline-none font-medium" value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)}>
+                            {availablePeriods.map(p => <option key={p} value={p}>{formatPeriodLabel(p)} ({p})</option>)}
+                        </select>
+                    </div>
+
+                    {/* Cards de Totais */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl relative overflow-hidden">
+                            <h3 className="text-zinc-400 text-sm font-medium mb-4 flex items-center"><TrendingUp size={16} className="mr-2 text-green-500" /> Receitas</h3>
+                            <div className="flex justify-between items-end mb-2">
+                                <div>
+                                    <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Previsto</p>
+                                    <p className="text-lg font-medium text-zinc-300">R$ {pInc.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Realizado</p>
+                                    <p className="text-2xl font-bold text-green-400">R$ {aInc.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl relative overflow-hidden">
+                            <h3 className="text-zinc-400 text-sm font-medium mb-4 flex items-center"><TrendingDown size={16} className="mr-2 text-red-500" /> Despesas</h3>
+                            <div className="flex justify-between items-end mb-2">
+                                <div>
+                                    <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Previsto</p>
+                                    <p className="text-lg font-medium text-zinc-300">R$ {pExp.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Realizado</p>
+                                    <p className={`text-2xl font-bold ${aExp > pExp ? 'text-red-500' : 'text-yellow-500'}`}>R$ {aExp.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                                </div>
+                            </div>
+                            <div className="w-full bg-zinc-800 rounded-full h-1.5 mt-2">
+                                <div className={`h-1.5 rounded-full ${aExp > pExp ? 'bg-red-500' : 'bg-yellow-500'}`} style={{ width: `${pExp > 0 ? Math.min((aExp/pExp)*100, 100) : (aExp > 0 ? 100 : 0)}%` }}></div>
+                            </div>
+                        </div>
+
+                        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl relative overflow-hidden">
+                            <h3 className="text-zinc-400 text-sm font-medium mb-4 flex items-center"><DollarSign size={16} className="mr-2 text-blue-500" /> Saldo</h3>
+                            <div className="flex justify-between items-end mb-2">
+                                <div>
+                                    <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Previsto</p>
+                                    <p className="text-lg font-medium text-zinc-300">R$ {pBal.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Realizado</p>
+                                    <p className={`text-2xl font-bold ${aBal >= 0 ? 'text-blue-400' : 'text-red-400'}`}>R$ {aBal.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Comparativo de Categorias */}
+                    <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl">
+                        <h3 className="text-lg font-semibold text-white mb-6 flex items-center">
+                            <PieChart className="mr-2 text-blue-500" size={20} />
+                            Cumprimento do Orçamento por Categoria
+                        </h3>
+                        <div className="space-y-5 max-h-[400px] overflow-y-auto pr-4 custom-scrollbar">
+                            {categoryComparison.length === 0 ? <p className="text-zinc-500 text-sm text-center py-4">Sem dados para este mês.</p> : (
+                                categoryComparison.map(({ cat, planned, actual }) => {
+                                    const percentage = planned > 0 ? Math.min((actual / planned) * 100, 100) : (actual > 0 ? 100 : 0);
+                                    const isOverBudget = actual > planned && planned > 0;
+                                    
+                                    return (
+                                        <div key={cat} className="group">
+                                            <div className="flex justify-between text-sm mb-1.5">
+                                                <span className="text-zinc-300 font-medium">{cat}</span>
+                                                <span className={isOverBudget ? 'text-red-400 font-bold' : 'text-zinc-400'}>
+                                                    R$ {actual.toLocaleString('pt-BR', {minimumFractionDigits: 2})} <span className="text-zinc-600 font-normal mx-1">/</span> R$ {planned.toLocaleString('pt-BR', {minimumFractionDigits: 2})}
+                                                </span>
+                                            </div>
+                                            <div className="w-full bg-zinc-800 rounded-full h-2.5 overflow-hidden">
+                                                <div className={`h-2.5 rounded-full transition-all duration-500 ${isOverBudget ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: `${percentage}%` }}></div>
+                                            </div>
+                                            {isOverBudget && <p className="text-[10px] text-red-500 mt-1 text-right">Ultrapassou o limite orçado em R$ {(actual - planned).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>}
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
 
         // --- MAIN APP COMPONENT ---
         const App = () => {
             const [user, setUser] = useState(null); 
             const [authLoading, setAuthLoading] = useState(true);
             const [isMobile, setIsMobile] = useState(false);
-            const [currentTab, setCurrentTab] = useState('budget');
+            const [currentTab, setCurrentTab] = useState('dashboard'); // Agora a aba padrão é a Visão Geral
             
             const [plannedTransactions, setPlannedTransactions] = useState([]);
             const [actualTransactions, setActualTransactions] = useState([]);
             const [expenseCategories, setExpenseCategories] = useState(INITIAL_CATEGORIES);
 
-            // Escuta as mudanças de Autenticação em Tempo Real
             useEffect(() => {
                 const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
                     setUser(currentUser);
@@ -719,65 +785,35 @@
                 return () => unsubscribe();
             }, []);
 
-            // Busca os dados do Firestore em Tempo Real
             useEffect(() => {
                 if (!user) {
-                    setPlannedTransactions([]);
-                    setActualTransactions([]);
-                    setExpenseCategories(INITIAL_CATEGORIES);
+                    setPlannedTransactions([]); setActualTransactions([]); setExpenseCategories(INITIAL_CATEGORIES);
                     return;
                 }
-
-                // Listener de Lançamentos de Orçamento (Planeados)
-                const unsubPlans = onSnapshot(
-                    collection(db, 'users', user.uid, 'plannedTransactions'), 
-                    (snapshot) => {
-                        const plans = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        setPlannedTransactions(plans);
-                    },
-                    (error) => console.error("Erro ao ler dados de orçamento:", error)
-                );
-
-                // Listener de Lançamentos Reais
-                const unsubActuals = onSnapshot(
-                    collection(db, 'users', user.uid, 'actualTransactions'), 
-                    (snapshot) => {
-                        const actuals = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        setActualTransactions(actuals);
-                    },
-                    (error) => console.error("Erro ao ler dados reais:", error)
-                );
-
-                // Listener de Categorias
-                const unsubCats = onSnapshot(
-                    doc(db, 'users', user.uid, 'settings', 'categories'), 
-                    (docSnap) => {
-                        if (docSnap.exists() && docSnap.data().list) {
-                            setExpenseCategories(docSnap.data().list);
-                        }
-                    },
-                    (error) => console.error("Erro ao ler categorias:", error)
-                );
+                const unsubPlans = onSnapshot(collection(db, 'users', user.uid, 'plannedTransactions'), (snapshot) => {
+                    setPlannedTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+                const unsubActuals = onSnapshot(collection(db, 'users', user.uid, 'actualTransactions'), (snapshot) => {
+                    setActualTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+                const unsubCats = onSnapshot(doc(db, 'users', user.uid, 'settings', 'categories'), (docSnap) => {
+                    if (docSnap.exists() && docSnap.data().list) setExpenseCategories(docSnap.data().list);
+                });
 
                 return () => { unsubPlans(); unsubActuals(); unsubCats(); };
             }, [user]);
 
             useEffect(() => {
                 const handleResize = () => setIsMobile(window.innerWidth < 768);
-                handleResize(); 
-                window.addEventListener('resize', handleResize);
+                handleResize(); window.addEventListener('resize', handleResize);
                 return () => window.removeEventListener('resize', handleResize);
             }, []);
 
-            if (authLoading) {
-                return <div className="flex h-screen items-center justify-center bg-black text-green-500"><Loader2 className="animate-spin" size={48} /></div>;
-            }
-
+            if (authLoading) return <div className="flex h-screen items-center justify-center bg-black text-green-500"><Loader2 className="animate-spin" size={48} /></div>;
             if (!user) return <AuthPage />;
 
             return (
                 <div className="flex h-screen bg-black font-sans overflow-hidden">
-                    {/* DESKTOP SIDEBAR */}
                     {!isMobile && (
                         <aside className="w-64 bg-zinc-950 border-r border-zinc-900 flex flex-col z-20">
                             <div className="p-6">
@@ -785,6 +821,7 @@
                                 <p className="text-xs text-zinc-500 mt-1">Gestão Familiar Avançada</p>
                             </div>
                             <nav className="flex-1 px-4 space-y-2 overflow-y-auto custom-scrollbar">
+                                <SidebarItem icon={Activity} label="Visão Geral" isActive={currentTab === 'dashboard'} onClick={() => setCurrentTab('dashboard')} />
                                 <SidebarItem icon={Target} label="Orçamento" isActive={currentTab === 'budget'} onClick={() => setCurrentTab('budget')} />
                                 <SidebarItem icon={Wallet} label="Despesas Reais" isActive={currentTab === 'actual'} onClick={() => setCurrentTab('actual')} />
                             </nav>
@@ -808,33 +845,23 @@
                         </aside>
                     )}
 
-                    {/* CONTEÚDO PRINCIPAL */}
                     <main className="flex-1 overflow-y-auto bg-black text-zinc-100 relative">
                         <div className="p-4 md:p-8">
+                            {currentTab === 'dashboard' && (
+                                <ComparisonDashboard plannedTransactions={plannedTransactions} actualTransactions={actualTransactions} expenseCategories={expenseCategories} />
+                            )}
                             {currentTab === 'budget' && (
                                 <TransactionManager 
-                                    key="budget"
-                                    user={user} 
-                                    transactions={plannedTransactions} 
-                                    expenseCategories={expenseCategories} 
-                                    collectionName="plannedTransactions"
-                                    title="Painel de Orçamento"
-                                    subtitle="Projeção e planeamento financeiro detalhado."
-                                    typeLabel="Previstas"
-                                    newLabel="Nova Previsão"
+                                    key="budget" user={user} transactions={plannedTransactions} expenseCategories={expenseCategories} 
+                                    collectionName="plannedTransactions" title="Painel de Orçamento" subtitle="Projeção e planeamento financeiro detalhado."
+                                    typeLabel="Previstas" newLabel="Nova Previsão"
                                 />
                             )}
                             {currentTab === 'actual' && (
                                 <TransactionManager 
-                                    key="actual"
-                                    user={user} 
-                                    transactions={actualTransactions} 
-                                    expenseCategories={expenseCategories} 
-                                    collectionName="actualTransactions"
-                                    title="Painel de Despesas Reais"
-                                    subtitle="Lançamento e acompanhamento de gastos e receitas efetivamente realizados."
-                                    typeLabel="Reais"
-                                    newLabel="Novo Lançamento Real"
+                                    key="actual" user={user} transactions={actualTransactions} expenseCategories={expenseCategories} 
+                                    collectionName="actualTransactions" title="Painel de Despesas Reais" subtitle="Acompanhamento de gastos e receitas efetivamente realizados."
+                                    typeLabel="Reais" newLabel="Novo Lançamento Real"
                                 />
                             )}
                             {currentTab === 'settings' && (
@@ -842,12 +869,11 @@
                             )}
                         </div>
                         
-                        {/* MOBILE NAV */}
                         {isMobile && (
                             <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950 border-t border-zinc-900 flex justify-around p-3 pb-safe z-20 shadow-[0_-4px_15px_rgba(0,0,0,0.5)]">
+                                <button onClick={() => setCurrentTab('dashboard')} className={`flex flex-col items-center p-2 ${currentTab === 'dashboard' ? 'text-green-500' : 'text-zinc-500'}`}><Activity size={20} /><span className="text-[10px] mt-1 font-medium">Dashboard</span></button>
                                 <button onClick={() => setCurrentTab('budget')} className={`flex flex-col items-center p-2 ${currentTab === 'budget' ? 'text-green-500' : 'text-zinc-500'}`}><Target size={20} /><span className="text-[10px] mt-1 font-medium">Orçamento</span></button>
                                 <button onClick={() => setCurrentTab('actual')} className={`flex flex-col items-center p-2 ${currentTab === 'actual' ? 'text-green-500' : 'text-zinc-500'}`}><Wallet size={20} /><span className="text-[10px] mt-1 font-medium">Reais</span></button>
-                                <button onClick={() => setCurrentTab('settings')} className={`flex flex-col items-center p-2 ${currentTab === 'settings' ? 'text-green-500' : 'text-zinc-500'}`}><Settings size={20} /><span className="text-[10px] mt-1 font-medium">Config.</span></button>
                             </nav>
                         )}
                     </main>
