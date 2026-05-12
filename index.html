@@ -24,13 +24,13 @@
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
-        import React, { useState, useMemo, useEffect } from "https://esm.sh/react@18";
+        import React, { useState, useMemo, useEffect, useRef } from "https://esm.sh/react@18";
         import { createRoot } from "https://esm.sh/react-dom@18/client";
         import { 
             LayoutDashboard, TrendingDown, TrendingUp, DollarSign,
             PieChart, Target, LogOut, Lock, Calendar, ListPlus,
             Tag, Trash2, Edit2, Plus, Settings, User as UserIcon, Key, Loader2,
-            BarChart3, Wallet, Activity
+            BarChart3, Wallet, Activity, Download, Upload
         } from "https://esm.sh/lucide-react@0.263.1";
 
         // --- FIREBASE IMPORTS ---
@@ -315,6 +315,8 @@
             
             const [selectedPeriod, setSelectedPeriod] = useState(currentYearMonth);
             const [editingId, setEditingId] = useState(null);
+            const [isImporting, setIsImporting] = useState(false);
+            const fileInputRef = useRef(null);
             const incomeCategories = ['Salário', 'Fonte diversa'];
 
             const defaultForm = { 
@@ -369,6 +371,138 @@
                 catch(e) { alert("Erro ao apagar lançamento."); }
             };
 
+            // --- LÓGICA DE IMPORTAÇÃO CSV ---
+            const downloadCSVTemplate = () => {
+                const headers = "Tipo,Descricao,Valor,Categoria,Periodo,Parcelado,Qtd_Parcelas,Recorrente,Fim_Recorrencia\n";
+                const row1 = "Despesa,Conta da Luz,150.50,Habitação,2026-05,Nao,,Nao,\n";
+                const row2 = "Receita,Salário Fixo,5000.00,Salário,2026-05,Nao,,Sim,2026-12\n";
+                const row3 = "Despesa,Geladeira Nova,2500.00,Outros,2026-05,Sim,10,Nao,\n";
+                const row4 = "Despesa,Mensalidade Escolar,600.00,Educação,2026-05,Nao,,Sim,2026-12\n";
+                const csvContent = "data:text/csv;charset=utf-8," + headers + row1 + row2 + row3 + row4;
+                const encodedUri = encodeURI(csvContent);
+                const link = document.createElement("a");
+                link.setAttribute("href", encodedUri);
+                link.setAttribute("download", "finhub_modelo_importacao.csv");
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            const processCSV = async (csvText) => {
+                setIsImporting(true);
+                try {
+                    const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
+                    if (lines.length < 2) {
+                        alert("Arquivo CSV vazio ou sem dados validos.");
+                        setIsImporting(false);
+                        return;
+                    }
+                    
+                    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+                    let batch = writeBatch(db);
+                    let operationCount = 0;
+                    let totalAdded = 0;
+
+                    const commitBatchIfNeeded = async () => {
+                        if (operationCount > 400) {
+                            await batch.commit();
+                            batch = writeBatch(db);
+                            operationCount = 0;
+                        }
+                    };
+
+                    for (let i = 1; i < lines.length; i++) {
+                        const row = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(v => v.replace(/^"|"$/g, '').trim());
+                        
+                        const getVal = (colName) => {
+                            const idx = headers.findIndex(h => h.includes(colName));
+                            return idx !== -1 && row[idx] ? row[idx] : '';
+                        };
+
+                        const tipoStr = getVal('tipo').toLowerCase();
+                        const type = tipoStr.includes('receita') ? 'income' : 'expense';
+                        const description = getVal('descricao') || 'Importado via CSV';
+                        const amount = parseFloat(getVal('valor')) || 0;
+                        const category = getVal('categoria') || 'Outros';
+                        const period = getVal('periodo'); 
+                        const isInstallment = getVal('parcelado').toLowerCase() === 'sim';
+                        const installmentsCount = parseInt(getVal('qtd_parcelas')) || 2;
+                        const isRecurring = getVal('recorrente').toLowerCase() === 'sim';
+                        const recurringEndPeriod = getVal('fim_recorrencia');
+
+                        if (isNaN(amount) || !period || amount <= 0) continue; 
+
+                        if (isRecurring && recurringEndPeriod >= period) {
+                            let currentIter = period;
+                            let iterCount = 0;
+                            while (currentIter <= recurringEndPeriod && iterCount < 120) {
+                                const newId = Date.now().toString() + "_" + i + "_" + iterCount;
+                                batch.set(doc(db, 'users', user.uid, collectionName, newId), {
+                                    type, category, amount, period: currentIter,
+                                    description, isInstallment: false, isRecurring: true
+                                });
+                                operationCount++;
+                                await commitBatchIfNeeded();
+                                
+                                currentIter = addMonthsToPeriod(currentIter, 1);
+                                iterCount++;
+                                totalAdded++;
+                            }
+                        } else if (isInstallment && installmentsCount > 1 && type === 'expense') {
+                            for (let j = 0; j < installmentsCount; j++) {
+                                const targetPeriod = addMonthsToPeriod(period, j);
+                                const newId = Date.now().toString() + "_" + i + "_" + j;
+                                const dataObj = {
+                                    type, category, amount, period: targetPeriod,
+                                    description: `${description} (${j + 1}/${installmentsCount})`, isInstallment: true
+                                };
+                                
+                                batch.set(doc(db, 'users', user.uid, collectionName, newId), dataObj);
+                                operationCount++;
+                                await commitBatchIfNeeded();
+                                
+                                if (collectionName === 'plannedTransactions') {
+                                    batch.set(doc(db, 'users', user.uid, 'actualTransactions', newId), dataObj);
+                                    operationCount++;
+                                    await commitBatchIfNeeded();
+                                }
+                                totalAdded++;
+                            }
+                        } else {
+                            const newId = Date.now().toString() + "_" + i;
+                            batch.set(doc(db, 'users', user.uid, collectionName, newId), {
+                                type, category, amount, period, description, isInstallment: false, isRecurring: false
+                            });
+                            operationCount++;
+                            await commitBatchIfNeeded();
+                            totalAdded++;
+                        }
+                    }
+                    
+                    if (operationCount > 0) {
+                        await batch.commit();
+                    }
+                    alert(`Importação concluída com sucesso! ${totalAdded} lançamentos foram gerados e sincronizados.`);
+                } catch (error) {
+                    console.error(error);
+                    alert("Erro ao importar CSV. Verifique se as colunas estão idênticas ao modelo fornecido.");
+                } finally {
+                    setIsImporting(false);
+                }
+            };
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    await processCSV(event.target.result);
+                    e.target.value = ''; 
+                };
+                reader.readAsText(file);
+            };
+
+            // --- LÓGICA DE SUBMISSÃO MANUAL ---
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 const baseAmount = parseFloat(formData.amount);
@@ -416,10 +550,7 @@
                                 description: `${formData.description} (${i + 1}/${formData.installmentsCount})`, isInstallment: true
                             };
                             
-                            // Grava no Orçamento ou nas Reais (dependendo de onde o user está)
                             batch.set(doc(db, 'users', user.uid, collectionName, newId), dataObj);
-                            
-                            // O SEGREDO: Se estivermos no Orçamento, espelha para as Reais!
                             if (collectionName === 'plannedTransactions') {
                                 batch.set(doc(db, 'users', user.uid, 'actualTransactions', newId), dataObj);
                             }
@@ -514,10 +645,28 @@
 
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="lg:col-span-1 bg-zinc-900 border border-zinc-800 p-6 rounded-xl h-fit">
-                            <h3 className="text-white font-medium mb-4 flex items-center">
-                                {editingId ? <Edit2 size={18} className="mr-2 text-blue-500"/> : <ListPlus size={18} className="mr-2 text-green-500"/>}
-                                {editingId ? 'Editar Lançamento' : `${newLabel} (${formatPeriodLabel(selectedPeriod)})`}
-                            </h3>
+                            
+                            {/* --- CABEÇALHO COM BOTÕES DE IMPORTAÇÃO CSV --- */}
+                            <div className="flex flex-col xl:flex-row xl:justify-between xl:items-center mb-4 gap-3">
+                                <h3 className="text-white font-medium flex items-center">
+                                    {editingId ? <Edit2 size={18} className="mr-2 text-blue-500"/> : <ListPlus size={18} className="mr-2 text-green-500"/>}
+                                    {editingId ? 'Editar Lançamento' : `${newLabel}`}
+                                </h3>
+                                
+                                {collectionName === 'plannedTransactions' && !editingId && (
+                                    <div className="flex space-x-2">
+                                        <button type="button" onClick={downloadCSVTemplate} className="flex items-center p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors" title="Baixar Modelo CSV">
+                                            <Download size={14} className="mr-1" /> <span className="text-xs">Modelo</span>
+                                        </button>
+                                        <button type="button" onClick={() => fileInputRef.current.click()} disabled={isImporting} className="flex items-center p-2 bg-green-600/20 hover:bg-green-600/40 text-green-400 rounded-lg transition-colors disabled:opacity-50" title="Importar CSV preenchido">
+                                            {isImporting ? <Loader2 size={14} className="animate-spin mr-1" /> : <Upload size={14} className="mr-1" />}
+                                            <span className="text-xs">{isImporting ? 'Lendo...' : 'Importar'}</span>
+                                        </button>
+                                        <input type="file" accept=".csv" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
+                                    </div>
+                                )}
+                            </div>
+
                             <form onSubmit={handleSubmit} className="space-y-4">
                                 <div className="grid grid-cols-2 gap-2">
                                     <div>
@@ -636,11 +785,10 @@
             );
         };
 
-        // --- NOVA ABA: DASHBOARD DE COMPARAÇÃO (PREVISTO VS REAL) ---
+        // --- DASHBOARD DE COMPARAÇÃO (PREVISTO VS REAL) ---
         const ComparisonDashboard = ({ plannedTransactions, actualTransactions, expenseCategories }) => {
             const currentYearMonth = new Date().toISOString().slice(0, 7);
             
-            // Consolidar todos os períodos existentes em ambas as bases de dados
             const availablePeriods = useMemo(() => {
                 const periods = new Set([currentYearMonth, ...plannedTransactions.map(p => p.period), ...actualTransactions.map(a => a.period)]);
                 return Array.from(periods).sort();
@@ -648,11 +796,9 @@
 
             const [selectedPeriod, setSelectedPeriod] = useState(currentYearMonth);
 
-            // Filtrar os dados para o mês selecionado
             const plannedMonth = useMemo(() => plannedTransactions.filter(p => p.period === selectedPeriod), [plannedTransactions, selectedPeriod]);
             const actualMonth = useMemo(() => actualTransactions.filter(a => a.period === selectedPeriod), [actualTransactions, selectedPeriod]);
 
-            // Totais
             const pInc = plannedMonth.filter(t => t.type === 'income').reduce((a,b) => a+b.amount, 0);
             const pExp = plannedMonth.filter(t => t.type === 'expense').reduce((a,b) => a+b.amount, 0);
             const pBal = pInc - pExp;
@@ -661,13 +807,12 @@
             const aExp = actualMonth.filter(t => t.type === 'expense').reduce((a,b) => a+b.amount, 0);
             const aBal = aInc - aExp;
 
-            // Agrupamento por Categorias para Barras de Comparação (Apenas Despesas)
             const categoryComparison = useMemo(() => {
                 return expenseCategories.map(cat => {
                     const pCat = plannedMonth.filter(t => t.type === 'expense' && t.category === cat).reduce((a,b) => a+b.amount, 0);
                     const aCat = actualMonth.filter(t => t.type === 'expense' && t.category === cat).reduce((a,b) => a+b.amount, 0);
                     return { cat, planned: pCat, actual: aCat };
-                }).filter(item => item.planned > 0 || item.actual > 0); // Ocultar categorias vazias em ambos
+                }).filter(item => item.planned > 0 || item.actual > 0); 
             }, [plannedMonth, actualMonth, expenseCategories]);
 
             return (
@@ -684,7 +829,6 @@
                         </select>
                     </div>
 
-                    {/* Cards de Totais */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl relative overflow-hidden">
                             <h3 className="text-zinc-400 text-sm font-medium mb-4 flex items-center"><TrendingUp size={16} className="mr-2 text-green-500" /> Receitas</h3>
@@ -732,7 +876,6 @@
                         </div>
                     </div>
 
-                    {/* Comparativo de Categorias */}
                     <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl">
                         <h3 className="text-lg font-semibold text-white mb-6 flex items-center">
                             <PieChart className="mr-2 text-blue-500" size={20} />
@@ -771,7 +914,7 @@
             const [user, setUser] = useState(null); 
             const [authLoading, setAuthLoading] = useState(true);
             const [isMobile, setIsMobile] = useState(false);
-            const [currentTab, setCurrentTab] = useState('dashboard'); // Agora a aba padrão é a Visão Geral
+            const [currentTab, setCurrentTab] = useState('dashboard'); 
             
             const [plannedTransactions, setPlannedTransactions] = useState([]);
             const [actualTransactions, setActualTransactions] = useState([]);
