@@ -305,7 +305,7 @@
 
         // --- COMPONENTE GESTOR DE TRANSAÇÕES (ORÇAMENTO E REAIS) ---
         const TransactionManager = ({ 
-            user, transactions, expenseCategories, collectionName, title, subtitle, typeLabel, newLabel
+            user, transactions, expenseCategories, collectionName, title, subtitle, typeLabel, newLabel, mobileInputOnly
         }) => {
             const currentYearMonth = new Date().toISOString().slice(0, 7);
             const availablePeriods = useMemo(() => {
@@ -373,15 +373,19 @@
 
             // --- LÓGICA DE IMPORTAÇÃO CSV ---
             const downloadCSVTemplate = () => {
-                const headers = "Tipo,Descricao,Valor,Categoria,Periodo,Parcelado,Qtd_Parcelas,Recorrente,Fim_Recorrencia\n";
-                const row1 = "Despesa,Conta da Luz,150.50,Habitação,2026-05,Nao,,Nao,\n";
-                const row2 = "Receita,Salário Fixo,5000.00,Salário,2026-05,Nao,,Sim,2026-12\n";
-                const row3 = "Despesa,Geladeira Nova,2500.00,Outros,2026-05,Sim,10,Nao,\n";
-                const row4 = "Despesa,Mensalidade Escolar,600.00,Educação,2026-05,Nao,,Sim,2026-12\n";
-                const csvContent = "data:text/csv;charset=utf-8," + headers + row1 + row2 + row3 + row4;
-                const encodedUri = encodeURI(csvContent);
+                const bom = "\uFEFF"; // Garante que o Excel abre com as colunas separadas e a codificação UTF-8 correta (Acentos)
+                const headers = "Tipo;Descricao;Valor;Categoria;Periodo;Parcelado;Qtd_Parcelas;Recorrente;Fim_Recorrencia\n";
+                const row1 = "Despesa;Conta da Luz;150,50;Habitação;2026-05;Nao;;Nao;\n";
+                const row2 = "Receita;Salário Fixo;5000,00;Salário;2026-05;Nao;;Sim;2026-12\n";
+                const row3 = "Despesa;Geladeira Nova;2500,00;Outros;2026-05;Sim;10;Nao;\n";
+                const row4 = "Despesa;Mensalidade Escolar;600,00;Educação;2026-05;Nao;;Sim;2026-12\n";
+                
+                const csvContent = bom + headers + row1 + row2 + row3 + row4;
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                
                 const link = document.createElement("a");
-                link.setAttribute("href", encodedUri);
+                link.setAttribute("href", url);
                 link.setAttribute("download", "finhub_modelo_importacao.csv");
                 document.body.appendChild(link);
                 link.click();
@@ -398,7 +402,10 @@
                         return;
                     }
                     
-                    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+                    // Deteta automaticamente se o utilizador guardou com ponto e vírgula (Excel PT-BR) ou vírgula
+                    const delimiter = lines[0].includes(';') ? ';' : ',';
+                    const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase());
+                    
                     let batch = writeBatch(db);
                     let operationCount = 0;
                     let totalAdded = 0;
@@ -412,7 +419,9 @@
                     };
 
                     for (let i = 1; i < lines.length; i++) {
-                        const row = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(v => v.replace(/^"|"$/g, '').trim());
+                        // Divide a linha usando o delimitador detetado, ignorando delimitadores dentro de aspas
+                        const splitRegex = new RegExp(`${delimiter}(?=(?:(?:[^"]*"){2})*[^"]*$)`);
+                        const row = lines[i].split(splitRegex).map(v => v.replace(/^"|"$/g, '').trim());
                         
                         const getVal = (colName) => {
                             const idx = headers.findIndex(h => h.includes(colName));
@@ -422,7 +431,16 @@
                         const tipoStr = getVal('tipo').toLowerCase();
                         const type = tipoStr.includes('receita') ? 'income' : 'expense';
                         const description = getVal('descricao') || 'Importado via CSV';
-                        const amount = parseFloat(getVal('valor')) || 0;
+                        
+                        // Parse robusto de valores financeiros (Aceita 1.500,50 ou 1500.50)
+                        let rawAmount = getVal('valor').replace(/R\$\s?/g, '').trim();
+                        if (rawAmount.includes(',') && rawAmount.includes('.')) {
+                            rawAmount = rawAmount.replace(/\./g, '').replace(',', '.'); // Remove ponto de milhar, troca vírgula por ponto
+                        } else if (rawAmount.includes(',')) {
+                            rawAmount = rawAmount.replace(',', '.'); // Troca vírgula decimal por ponto
+                        }
+                        const amount = parseFloat(rawAmount) || 0;
+                        
                         const category = getVal('categoria') || 'Outros';
                         const period = getVal('periodo'); 
                         const isInstallment = getVal('parcelado').toLowerCase() === 'sim';
@@ -570,64 +588,71 @@
 
             return (
                 <div className="space-y-6 pb-24 md:pb-0">
-                    <div>
-                        <h2 className="text-2xl font-bold text-white mb-1">{title}</h2>
-                        <p className="text-zinc-400 text-sm">{subtitle}</p>
-                    </div>
-
-                    <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl relative overflow-hidden">
-                        <div className="absolute top-0 right-0 w-64 h-64 bg-green-500/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none"></div>
-                        <div className="flex items-center mb-6">
-                            <PieChart size={24} className="text-blue-500 mr-3" />
-                            <h3 className="text-xl font-bold text-white">Resumo Anual ({currentYear})</h3>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10">
-                            <div className="space-y-4">
-                                <div className="bg-black/50 border border-zinc-800/80 p-4 rounded-xl flex justify-between items-center backdrop-blur-sm">
-                                    <span className="text-sm font-medium text-zinc-400">Receitas Acumuladas</span>
-                                    <span className="text-xl font-bold text-green-400">R$ {annualIncome.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
-                                </div>
-                                <div className="bg-black/50 border border-zinc-800/80 p-4 rounded-xl flex justify-between items-center backdrop-blur-sm">
-                                    <span className="text-sm font-medium text-zinc-400">Despesas Acumuladas</span>
-                                    <span className="text-xl font-bold text-red-400">R$ {annualExpense.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
-                                </div>
-                                <div className={`border p-4 rounded-xl flex justify-between items-center backdrop-blur-sm ${annualBalance >= 0 ? 'bg-blue-900/20 border-blue-900/50' : 'bg-red-900/20 border-red-900/50'}`}>
-                                    <span className="text-sm font-medium text-zinc-300">Balanço Final</span>
-                                    <span className={`text-2xl font-black ${annualBalance >= 0 ? 'text-blue-400' : 'text-red-400'}`}>R$ {annualBalance.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
-                                </div>
-                            </div>
+                    {!mobileInputOnly && (
+                        <>
                             <div>
-                                <h4 className="text-xs font-bold text-zinc-500 mb-4 uppercase tracking-wider flex items-center"><BarChart3 size={14} className="mr-2" /> {typeLabel === 'Previstas' ? 'Projeção' : 'Distribuição'} de Despesas</h4>
-                                <div className="space-y-4 max-h-[220px] overflow-y-auto custom-scrollbar pr-3">
-                                    {annualExpensesByCategory.length === 0 ? <p className="text-sm text-zinc-500 text-center py-4 border border-dashed border-zinc-800 rounded-lg">Nenhuma despesa registada neste ano.</p> : (
-                                        annualExpensesByCategory.map(([cat, amount]) => {
-                                            const percentage = annualExpense > 0 ? (amount / annualExpense) * 100 : 0;
-                                            return (
-                                                <div key={cat} className="group">
-                                                    <div className="flex justify-between text-xs mb-1.5">
-                                                        <span className="font-medium text-zinc-300 group-hover:text-white transition-colors">{cat}</span>
-                                                        <span className="text-zinc-400 font-medium">R$ {amount.toLocaleString('pt-BR', {minimumFractionDigits: 2})} <span className="text-zinc-600 ml-1">({percentage.toFixed(1)}%)</span></span>
-                                                    </div>
-                                                    <div className="w-full bg-zinc-800/80 rounded-full h-2 overflow-hidden">
-                                                        <div className="bg-zinc-600 h-2 rounded-full group-hover:bg-blue-500 transition-colors" style={{ width: `${percentage}%` }}></div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })
-                                    )}
+                                <h2 className="text-2xl font-bold text-white mb-1">{title}</h2>
+                                <p className="text-zinc-400 text-sm">{subtitle}</p>
+                            </div>
+
+                            <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl relative overflow-hidden">
+                                <div className="absolute top-0 right-0 w-64 h-64 bg-green-500/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none"></div>
+                                <div className="flex items-center mb-6">
+                                    <PieChart size={24} className="text-blue-500 mr-3" />
+                                    <h3 className="text-xl font-bold text-white">Resumo Anual ({currentYear})</h3>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10">
+                                    <div className="space-y-4">
+                                        <div className="bg-black/50 border border-zinc-800/80 p-4 rounded-xl flex justify-between items-center backdrop-blur-sm">
+                                            <span className="text-sm font-medium text-zinc-400">Receitas Acumuladas</span>
+                                            <span className="text-xl font-bold text-green-400">R$ {annualIncome.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
+                                        </div>
+                                        <div className="bg-black/50 border border-zinc-800/80 p-4 rounded-xl flex justify-between items-center backdrop-blur-sm">
+                                            <span className="text-sm font-medium text-zinc-400">Despesas Acumuladas</span>
+                                            <span className="text-xl font-bold text-red-400">R$ {annualExpense.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
+                                        </div>
+                                        <div className={`border p-4 rounded-xl flex justify-between items-center backdrop-blur-sm ${annualBalance >= 0 ? 'bg-blue-900/20 border-blue-900/50' : 'bg-red-900/20 border-red-900/50'}`}>
+                                            <span className="text-sm font-medium text-zinc-300">Balanço Final</span>
+                                            <span className={`text-2xl font-black ${annualBalance >= 0 ? 'text-blue-400' : 'text-red-400'}`}>R$ {annualBalance.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <h4 className="text-xs font-bold text-zinc-500 mb-4 uppercase tracking-wider flex items-center"><BarChart3 size={14} className="mr-2" /> {typeLabel === 'Previstas' ? 'Projeção' : 'Distribuição'} de Despesas</h4>
+                                        <div className="space-y-4 max-h-[220px] overflow-y-auto custom-scrollbar pr-3">
+                                            {annualExpensesByCategory.length === 0 ? <p className="text-sm text-zinc-500 text-center py-4 border border-dashed border-zinc-800 rounded-lg">Nenhuma despesa registada neste ano.</p> : (
+                                                annualExpensesByCategory.map(([cat, amount]) => {
+                                                    const percentage = annualExpense > 0 ? (amount / annualExpense) * 100 : 0;
+                                                    return (
+                                                        <div key={cat} className="group">
+                                                            <div className="flex justify-between text-xs mb-1.5">
+                                                                <span className="font-medium text-zinc-300 group-hover:text-white transition-colors">{cat}</span>
+                                                                <span className="text-zinc-400 font-medium">R$ {amount.toLocaleString('pt-BR', {minimumFractionDigits: 2})} <span className="text-zinc-600 ml-1">({percentage.toFixed(1)}%)</span></span>
+                                                            </div>
+                                                            <div className="w-full bg-zinc-800/80 rounded-full h-2 overflow-hidden">
+                                                                <div className="bg-zinc-600 h-2 rounded-full group-hover:bg-blue-500 transition-colors" style={{ width: `${percentage}%` }}></div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })
+                                            )}
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    </div>
 
-                    {/* Gráfico Linear logo abaixo do Resumo Anual */}
-                    <TransactionChart transactions={transactions} availablePeriods={availablePeriods} />
+                            <TransactionChart transactions={transactions} availablePeriods={availablePeriods} />
+                        </>
+                    )}
 
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-zinc-900 border border-zinc-800 p-4 rounded-xl mt-6">
                         <div>
-                            <h3 className="text-lg font-bold text-white mb-1">Lançamentos Mensais</h3>
-                            <p className="text-zinc-400 text-xs">Selecione o mês para visualizar ou adicionar dados.</p>
+                            <h3 className="text-lg font-bold text-white mb-1">
+                                {mobileInputOnly ? 'Lançamento Rápido' : 'Lançamentos Mensais'}
+                            </h3>
+                            <p className="text-zinc-400 text-xs">
+                                {mobileInputOnly ? 'Adicione gastos e receitas ao seu fluxo de caixa.' : 'Selecione o mês para visualizar ou adicionar dados.'}
+                            </p>
                         </div>
                         <div className="flex items-center space-x-2">
                             <div className="flex items-center space-x-2 bg-black border border-zinc-800 rounded-lg p-1">
@@ -637,23 +662,24 @@
                                     {availablePeriods.map(p => <option key={p} value={p}>{formatPeriodLabel(p)} ({p})</option>)}
                                 </select>
                             </div>
-                            <button onClick={handleAddMonth} className="flex items-center px-3 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg transition-colors border border-zinc-700">
-                                <Plus size={18} className="md:mr-2" /><span className="hidden md:inline text-sm font-medium">Add Mês</span>
-                            </button>
+                            {!mobileInputOnly && (
+                                <button onClick={handleAddMonth} className="flex items-center px-3 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg transition-colors border border-zinc-700">
+                                    <Plus size={18} className="md:mr-2" /><span className="hidden md:inline text-sm font-medium">Add Mês</span>
+                                </button>
+                            )}
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-1 bg-zinc-900 border border-zinc-800 p-6 rounded-xl h-fit">
+                    <div className={`grid grid-cols-1 ${mobileInputOnly ? '' : 'lg:grid-cols-3'} gap-6`}>
+                        <div className={`${mobileInputOnly ? 'col-span-1' : 'lg:col-span-1'} bg-zinc-900 border border-zinc-800 p-6 rounded-xl h-fit`}>
                             
-                            {/* --- CABEÇALHO COM BOTÕES DE IMPORTAÇÃO CSV --- */}
                             <div className="flex flex-col xl:flex-row xl:justify-between xl:items-center mb-4 gap-3">
                                 <h3 className="text-white font-medium flex items-center">
                                     {editingId ? <Edit2 size={18} className="mr-2 text-blue-500"/> : <ListPlus size={18} className="mr-2 text-green-500"/>}
                                     {editingId ? 'Editar Lançamento' : `${newLabel}`}
                                 </h3>
                                 
-                                {collectionName === 'plannedTransactions' && !editingId && (
+                                {collectionName === 'plannedTransactions' && !editingId && !mobileInputOnly && (
                                     <div className="flex space-x-2">
                                         <button type="button" onClick={downloadCSVTemplate} className="flex items-center p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors" title="Baixar Modelo CSV">
                                             <Download size={14} className="mr-1" /> <span className="text-xs">Modelo</span>
@@ -728,58 +754,60 @@
                             </form>
                         </div>
 
-                        <div className="lg:col-span-2 space-y-4">
-                            <div className="grid grid-cols-3 gap-4">
-                                <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
-                                    <p className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1">Receitas {typeLabel}</p>
-                                    <p className="text-lg font-bold text-green-400">R$ {totalIncome.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                        {!mobileInputOnly && (
+                            <div className="lg:col-span-2 space-y-4">
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+                                        <p className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1">Receitas {typeLabel}</p>
+                                        <p className="text-lg font-bold text-green-400">R$ {totalIncome.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                                    </div>
+                                    <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+                                        <p className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1">Despesas {typeLabel}</p>
+                                        <p className="text-lg font-bold text-red-400">R$ {totalExpense.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                                    </div>
+                                    <div className={`border p-4 rounded-xl ${balance >= 0 ? 'bg-blue-900/10 border-blue-900/30' : 'bg-red-900/10 border-red-900/30'}`}>
+                                        <p className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1">Saldo do Mês</p>
+                                        <p className={`text-lg font-bold ${balance >= 0 ? 'text-blue-400' : 'text-red-400'}`}>R$ {balance.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                                    </div>
                                 </div>
-                                <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
-                                    <p className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1">Despesas {typeLabel}</p>
-                                    <p className="text-lg font-bold text-red-400">R$ {totalExpense.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
-                                </div>
-                                <div className={`border p-4 rounded-xl ${balance >= 0 ? 'bg-blue-900/10 border-blue-900/30' : 'bg-red-900/10 border-red-900/30'}`}>
-                                    <p className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1">Saldo do Mês</p>
-                                    <p className={`text-lg font-bold ${balance >= 0 ? 'text-blue-400' : 'text-red-400'}`}>R$ {balance.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
-                                </div>
-                            </div>
-                            
-                            <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h3 className="text-white font-medium">Lançamentos em {formatPeriodLabel(selectedPeriod)}</h3>
-                                </div>
-                                <div className="space-y-2 max-h-[350px] overflow-y-auto pr-2 custom-scrollbar">
-                                    {currentMonthTransactions.length === 0 ? <p className="text-zinc-500 text-sm text-center py-8">Nenhum item registado para este mês.</p> : (
-                                        currentMonthTransactions.map(item => (
-                                            <div key={item.id} className="flex justify-between items-center p-3 bg-black rounded-lg border border-zinc-800 hover:border-zinc-700 transition-colors group">
-                                                <div className="flex items-center space-x-3">
-                                                    <div className={`p-2 rounded-lg ${item.type === 'income' ? 'bg-green-500/10 text-green-500' : 'bg-zinc-900 text-zinc-400'}`}>
-                                                        {item.type === 'income' ? <TrendingUp size={16} /> : <Tag size={16} />}
+                                
+                                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h3 className="text-white font-medium">Lançamentos em {formatPeriodLabel(selectedPeriod)}</h3>
+                                    </div>
+                                    <div className="space-y-2 max-h-[350px] overflow-y-auto pr-2 custom-scrollbar">
+                                        {currentMonthTransactions.length === 0 ? <p className="text-zinc-500 text-sm text-center py-8">Nenhum item registado para este mês.</p> : (
+                                            currentMonthTransactions.map(item => (
+                                                <div key={item.id} className="flex justify-between items-center p-3 bg-black rounded-lg border border-zinc-800 hover:border-zinc-700 transition-colors group">
+                                                    <div className="flex items-center space-x-3">
+                                                        <div className={`p-2 rounded-lg ${item.type === 'income' ? 'bg-green-500/10 text-green-500' : 'bg-zinc-900 text-zinc-400'}`}>
+                                                            {item.type === 'income' ? <TrendingUp size={16} /> : <Tag size={16} />}
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-sm font-medium text-white">
+                                                                {item.description}
+                                                                {item.isRecurring && <span className="ml-2 text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">Recorrente</span>}
+                                                                {item.isInstallment && <span className="ml-2 text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded">Parcelado</span>}
+                                                            </p>
+                                                            <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{item.category}</p>
+                                                        </div>
                                                     </div>
-                                                    <div>
-                                                        <p className="text-sm font-medium text-white">
-                                                            {item.description}
-                                                            {item.isRecurring && <span className="ml-2 text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">Recorrente</span>}
-                                                            {item.isInstallment && <span className="ml-2 text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded">Parcelado</span>}
-                                                        </p>
-                                                        <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{item.category}</p>
+                                                    <div className="flex items-center space-x-4">
+                                                        <span className={`font-medium ${item.type === 'expense' ? 'text-red-400' : 'text-green-400'}`}>
+                                                            {item.type === 'expense' ? '-' : '+'}R$ {item.amount.toLocaleString('pt-BR', {minimumFractionDigits: 2})}
+                                                        </span>
+                                                        <div className="flex space-x-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <button onClick={() => handleEdit(item)} className="p-1.5 bg-zinc-800 hover:bg-blue-600 text-zinc-400 hover:text-white rounded transition-colors"><Edit2 size={14} /></button>
+                                                            <button onClick={() => handleDelete(item.id)} className="p-1.5 bg-zinc-800 hover:bg-red-600 text-zinc-400 hover:text-white rounded transition-colors"><Trash2 size={14} /></button>
+                                                        </div>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center space-x-4">
-                                                    <span className={`font-medium ${item.type === 'expense' ? 'text-red-400' : 'text-green-400'}`}>
-                                                        {item.type === 'expense' ? '-' : '+'}R$ {item.amount.toLocaleString('pt-BR', {minimumFractionDigits: 2})}
-                                                    </span>
-                                                    <div className="flex space-x-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                                                        <button onClick={() => handleEdit(item)} className="p-1.5 bg-zinc-800 hover:bg-blue-600 text-zinc-400 hover:text-white rounded transition-colors"><Edit2 size={14} /></button>
-                                                        <button onClick={() => handleDelete(item.id)} className="p-1.5 bg-zinc-800 hover:bg-red-600 text-zinc-400 hover:text-white rounded transition-colors"><Trash2 size={14} /></button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ))
-                                    )}
+                                            ))
+                                        )}
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        )}
                     </div>
                 </div>
             );
@@ -947,16 +975,25 @@
             }, [user]);
 
             useEffect(() => {
-                const handleResize = () => setIsMobile(window.innerWidth < 768);
-                handleResize(); window.addEventListener('resize', handleResize);
+                const handleResize = () => {
+                    const mobile = window.innerWidth < 768;
+                    setIsMobile(mobile);
+                    // Garante que o mobile não fica preso em abas inacessíveis
+                    if (mobile && (currentTab === 'budget' || currentTab === 'settings')) {
+                        setCurrentTab('dashboard');
+                    }
+                };
+                handleResize(); 
+                window.addEventListener('resize', handleResize);
                 return () => window.removeEventListener('resize', handleResize);
-            }, []);
+            }, [currentTab]);
 
             if (authLoading) return <div className="flex h-screen items-center justify-center bg-black text-green-500"><Loader2 className="animate-spin" size={48} /></div>;
             if (!user) return <AuthPage />;
 
             return (
                 <div className="flex h-screen bg-black font-sans overflow-hidden">
+                    {/* DESKTOP SIDEBAR */}
                     {!isMobile && (
                         <aside className="w-64 bg-zinc-950 border-r border-zinc-900 flex flex-col z-20">
                             <div className="p-6">
@@ -975,20 +1012,35 @@
                                 </div>
                                 <div className="p-4 flex items-center justify-between">
                                     <div className="flex items-center space-x-3">
-                                        <div className="w-8 h-8 rounded-full bg-green-900 flex items-center justify-center text-green-400 font-bold border border-green-700">
+                                        <div className="w-8 h-8 rounded-full bg-green-900 flex items-center justify-center text-green-400 font-bold border border-green-700 text-xs">
                                             {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
                                         </div>
                                         <div className="overflow-hidden">
                                             <p className="text-sm font-medium text-white truncate w-24">{user.displayName || 'Utilizador'}</p>
                                         </div>
                                     </div>
-                                    <button onClick={() => signOut(auth)} className="text-zinc-500 hover:text-red-400"><LogOut size={18} /></button>
+                                    <button onClick={() => signOut(auth)} className="text-zinc-500 hover:text-red-400 p-2"><LogOut size={18} /></button>
                                 </div>
                             </div>
                         </aside>
                     )}
 
                     <main className="flex-1 overflow-y-auto bg-black text-zinc-100 relative">
+                        {/* MOBILE HEADER COM LOGOUT */}
+                        {isMobile && (
+                            <header className="bg-zinc-950 border-b border-zinc-900 p-4 flex justify-between items-center sticky top-0 z-30 shadow-md">
+                                <h1 className="text-xl font-black text-white tracking-tighter">FIN<span className="text-green-500">HUB</span></h1>
+                                <div className="flex items-center space-x-3">
+                                    <div className="w-7 h-7 rounded-full bg-green-900 flex items-center justify-center text-green-400 font-bold border border-green-700 text-xs">
+                                        {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
+                                    </div>
+                                    <button onClick={() => signOut(auth)} className="text-zinc-500 hover:text-red-400 bg-zinc-900 p-1.5 rounded-lg border border-zinc-800">
+                                        <LogOut size={16} />
+                                    </button>
+                                </div>
+                            </header>
+                        )}
+
                         <div className="p-4 md:p-8">
                             {currentTab === 'dashboard' && (
                                 <ComparisonDashboard plannedTransactions={plannedTransactions} actualTransactions={actualTransactions} expenseCategories={expenseCategories} />
@@ -997,14 +1049,14 @@
                                 <TransactionManager 
                                     key="budget" user={user} transactions={plannedTransactions} expenseCategories={expenseCategories} 
                                     collectionName="plannedTransactions" title="Painel de Orçamento" subtitle="Projeção e planeamento financeiro detalhado."
-                                    typeLabel="Previstas" newLabel="Nova Previsão"
+                                    typeLabel="Previstas" newLabel="Nova Previsão" mobileInputOnly={false}
                                 />
                             )}
                             {currentTab === 'actual' && (
                                 <TransactionManager 
                                     key="actual" user={user} transactions={actualTransactions} expenseCategories={expenseCategories} 
                                     collectionName="actualTransactions" title="Painel de Despesas Reais" subtitle="Acompanhamento de gastos e receitas efetivamente realizados."
-                                    typeLabel="Reais" newLabel="Novo Lançamento Real"
+                                    typeLabel="Reais" newLabel="Novo Lançamento Real" mobileInputOnly={isMobile}
                                 />
                             )}
                             {currentTab === 'settings' && (
@@ -1012,11 +1064,11 @@
                             )}
                         </div>
                         
+                        {/* MOBILE BOTTOM NAV */}
                         {isMobile && (
                             <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950 border-t border-zinc-900 flex justify-around p-3 pb-safe z-20 shadow-[0_-4px_15px_rgba(0,0,0,0.5)]">
                                 <button onClick={() => setCurrentTab('dashboard')} className={`flex flex-col items-center p-2 ${currentTab === 'dashboard' ? 'text-green-500' : 'text-zinc-500'}`}><Activity size={20} /><span className="text-[10px] mt-1 font-medium">Dashboard</span></button>
-                                <button onClick={() => setCurrentTab('budget')} className={`flex flex-col items-center p-2 ${currentTab === 'budget' ? 'text-green-500' : 'text-zinc-500'}`}><Target size={20} /><span className="text-[10px] mt-1 font-medium">Orçamento</span></button>
-                                <button onClick={() => setCurrentTab('actual')} className={`flex flex-col items-center p-2 ${currentTab === 'actual' ? 'text-green-500' : 'text-zinc-500'}`}><Wallet size={20} /><span className="text-[10px] mt-1 font-medium">Reais</span></button>
+                                <button onClick={() => setCurrentTab('actual')} className={`flex flex-col items-center p-2 ${currentTab === 'actual' ? 'text-green-500' : 'text-zinc-500'}`}><Plus size={20} /><span className="text-[10px] mt-1 font-medium">Lançar Reais</span></button>
                             </nav>
                         )}
                     </main>
