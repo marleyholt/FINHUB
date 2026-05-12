@@ -89,17 +89,35 @@
                 e.preventDefault();
                 setLoading(true);
                 setError('');
+                
                 try {
                     if (isLogin) {
                         await signInWithEmailAndPassword(auth, formData.email, formData.password);
                     } else {
+                        // 1. Tenta criar o utilizador
                         const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
-                        await updateProfile(userCredential.user, { displayName: formData.name });
-                        // Criar categorias padrão para o novo usuário
-                        await setDoc(doc(db, 'users', userCredential.user.uid, 'settings', 'categories'), { list: INITIAL_CATEGORIES });
+                        
+                        try {
+                            // 2. Tenta guardar o nome e categorias iniciais
+                            await updateProfile(userCredential.user, { displayName: formData.name });
+                            await setDoc(doc(db, 'users', userCredential.user.uid, 'settings', 'categories'), { list: INITIAL_CATEGORIES });
+                        } catch (firestoreErr) {
+                            console.error("Aviso: Utilizador criado, mas falhou ao guardar definições no Firestore:", firestoreErr);
+                            // Não bloqueia o login se o erro for apenas da base de dados
+                        }
                     }
                 } catch (err) {
-                    setError(err.message.includes('auth/') ? 'Credenciais inválidas ou e-mail já em uso.' : 'Erro ao autenticar.');
+                    console.error("Erro detalhado do Firebase:", err);
+                    
+                    // Tradução dos erros mais comuns do Firebase para ajudar na depuração
+                    let msgErro = "Erro desconhecido: " + err.message;
+                    if (err.code === 'auth/email-already-in-use') msgErro = 'Este e-mail já está registado. Tente iniciar sessão.';
+                    else if (err.code === 'auth/invalid-credential') msgErro = 'Palavra-passe incorreta ou e-mail não encontrado.';
+                    else if (err.code === 'auth/weak-password') msgErro = 'A palavra-passe é muito fraca (mínimo de 6 caracteres).';
+                    else if (err.code === 'auth/operation-not-allowed') msgErro = 'Autenticação por E-mail/Palavra-passe não está ativada no painel do Firebase!';
+                    else if (err.code === 'auth/network-request-failed') msgErro = 'Erro de rede. Verifique a sua ligação à internet.';
+
+                    setError(msgErro);
                 } finally {
                     setLoading(false);
                 }
@@ -127,7 +145,7 @@
                                 <input type="email" required value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-lg p-3 focus:outline-none focus:border-green-500" />
                             </div>
                             <div>
-                                <label className="block text-sm text-zinc-400 mb-1">Senha (Mín. 6 chars)</label>
+                                <label className="block text-sm text-zinc-400 mb-1">Senha (Mín. 6 caracteres)</label>
                                 <input type="password" required value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-lg p-3 focus:outline-none focus:border-green-500" />
                             </div>
                             <button type="submit" disabled={loading} className="w-full bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg transition-colors flex items-center justify-center mt-6">
@@ -135,7 +153,7 @@
                             </button>
                         </form>
                         <div className="mt-6 text-center">
-                            <button onClick={() => { setIsLogin(!isLogin); setError(''); }} className="text-sm text-green-500 hover:text-green-400">
+                            <button onClick={() => { setIsLogin(!isLogin); setError(''); setFormData({ name: '', email: '', password: '' }); }} className="text-sm text-green-500 hover:text-green-400">
                                 {isLogin ? 'Não tem conta? Cadastre-se' : 'Já tem conta? Inicie sessão'}
                             </button>
                         </div>
@@ -342,7 +360,12 @@
             };
 
             const handleDelete = async (id) => {
-                await deleteDoc(doc(db, 'users', user.uid, 'plannedTransactions', id));
+                try {
+                    await deleteDoc(doc(db, 'users', user.uid, 'plannedTransactions', id));
+                } catch(e) {
+                    console.error("Erro ao apagar:", e);
+                    alert("Erro ao apagar lançamento. Verifique as regras do Firestore.");
+                }
             };
 
             const handleSubmit = async (e) => {
@@ -351,31 +374,41 @@
                 if (isNaN(baseAmount)) return;
 
                 if (editingId) {
-                    await updateDoc(doc(db, 'users', user.uid, 'plannedTransactions', editingId), { ...formData, amount: baseAmount, period: selectedPeriod });
-                    setEditingId(null);
-                    setFormData(defaultForm);
+                    try {
+                        await updateDoc(doc(db, 'users', user.uid, 'plannedTransactions', editingId), { ...formData, amount: baseAmount, period: selectedPeriod });
+                        setEditingId(null);
+                        setFormData(defaultForm);
+                    } catch (err) {
+                        console.error("Erro ao atualizar:", err);
+                        alert("Erro ao atualizar lançamento. Verifique permissões.");
+                    }
                     return;
                 }
 
-                if (formData.isInstallment && formData.installmentsCount > 1 && formData.type === 'expense') {
-                    const batch = writeBatch(db);
-                    for (let i = 0; i < formData.installmentsCount; i++) {
-                        const targetPeriod = addMonthsToPeriod(selectedPeriod, i);
-                        const newId = Date.now().toString() + i;
-                        const docRef = doc(db, 'users', user.uid, 'plannedTransactions', newId);
-                        batch.set(docRef, {
-                            type: formData.type, category: formData.category, amount: baseAmount, period: targetPeriod,
-                            description: `${formData.description} (${i + 1}/${formData.installmentsCount})`, isInstallment: true
+                try {
+                    if (formData.isInstallment && formData.installmentsCount > 1 && formData.type === 'expense') {
+                        const batch = writeBatch(db);
+                        for (let i = 0; i < formData.installmentsCount; i++) {
+                            const targetPeriod = addMonthsToPeriod(selectedPeriod, i);
+                            const newId = Date.now().toString() + i;
+                            const docRef = doc(db, 'users', user.uid, 'plannedTransactions', newId);
+                            batch.set(docRef, {
+                                type: formData.type, category: formData.category, amount: baseAmount, period: targetPeriod,
+                                description: `${formData.description} (${i + 1}/${formData.installmentsCount})`, isInstallment: true
+                            });
+                        }
+                        await batch.commit();
+                    } else {
+                        const newId = Date.now().toString();
+                        await setDoc(doc(db, 'users', user.uid, 'plannedTransactions', newId), {
+                            type: formData.type, category: formData.category, amount: baseAmount, period: selectedPeriod, description: formData.description, isInstallment: false
                         });
                     }
-                    await batch.commit();
-                } else {
-                    const newId = Date.now().toString();
-                    await setDoc(doc(db, 'users', user.uid, 'plannedTransactions', newId), {
-                        type: formData.type, category: formData.category, amount: baseAmount, period: selectedPeriod, description: formData.description, isInstallment: false
-                    });
+                    setFormData(defaultForm);
+                } catch (err) {
+                    console.error("Erro ao gravar novo lançamento:", err);
+                    alert("Erro ao guardar. Verifique se a sua base de dados Firestore está ativa e com as regras corretas.");
                 }
-                setFormData(defaultForm);
             };
 
             return (
@@ -533,17 +566,28 @@
                 }
 
                 // Listener de Lançamentos
-                const unsubPlans = onSnapshot(collection(db, 'users', user.uid, 'plannedTransactions'), (snapshot) => {
-                    const plans = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    setPlannedTransactions(plans);
-                });
+                const unsubPlans = onSnapshot(
+                    collection(db, 'users', user.uid, 'plannedTransactions'), 
+                    (snapshot) => {
+                        const plans = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        setPlannedTransactions(plans);
+                    },
+                    (error) => {
+                        console.error("Erro ao ler dados Firestore:", error);
+                        // Ignora falhas de permissão para manter a app a funcionar
+                    }
+                );
 
                 // Listener de Categorias
-                const unsubCats = onSnapshot(doc(db, 'users', user.uid, 'settings', 'categories'), (docSnap) => {
-                    if (docSnap.exists() && docSnap.data().list) {
-                        setExpenseCategories(docSnap.data().list);
-                    }
-                });
+                const unsubCats = onSnapshot(
+                    doc(db, 'users', user.uid, 'settings', 'categories'), 
+                    (docSnap) => {
+                        if (docSnap.exists() && docSnap.data().list) {
+                            setExpenseCategories(docSnap.data().list);
+                        }
+                    },
+                    (error) => console.error("Erro ao ler categorias:", error)
+                );
 
                 return () => { unsubPlans(); unsubCats(); };
             }, [user]);
