@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FinHub - Gestão Financeira Familiar</title>
+    
+    <!-- Tailwind CSS (via CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Babel (para compilar React no Browser) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        /* Estilos base e scrollbar customizada para ficar premium */
+        body { margin: 0; background-color: #000; color: #fff; font-family: system-ui, -apple-system, sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #27272a; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
+    </style>
+</head>
+<body>
+    <!-- Onde o React vai ser renderizado -->
+    <div id="root"></div>
+
+    <!-- O Código React (Módulos importados via esm.sh) -->
+    <script type="text/babel" data-type="module">
+        import React, { useState, useMemo, useEffect } from "https://esm.sh/react@18";
+        import { createRoot } from "https://esm.sh/react-dom@18/client";
+        import { 
+            LayoutDashboard, TrendingDown, TrendingUp, DollarSign,
+            PieChart, Target, LogOut, Lock, Calendar, ListPlus,
+            Tag, Trash2, Edit2, Plus, Settings, User as UserIcon, Key
+        } from "https://esm.sh/lucide-react@0.263.1";
+
+        // --- INITIAL STATE ---
+        const INITIAL_CATEGORIES = ['Habitação', 'Alimentação', 'Lazer', 'Transporte', 'Saúde', 'Educação', 'Outros'];
+
+        // --- HELPER FUNCTIONS ---
+        const addMonthsToPeriod = (periodStr, monthsToAdd) => {
+            if (!periodStr) return '';
+            const [year, month] = periodStr.split('-').map(Number);
+            const date = new Date(year, month - 1 + monthsToAdd, 1);
+            return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        };
+
+        const formatPeriodLabel = (periodStr) => {
+            if (!periodStr) return '';
+            const [year, month] = periodStr.split('-');
+            const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+            return `${meses[parseInt(month) - 1]}/${year.substring(2)}`;
+        };
+
+        // --- COMPONENTS ---
+        const SidebarItem = ({ icon: Icon, label, isActive, onClick }) => (
+            <button 
+                onClick={onClick}
+                className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors duration-200 ${
+                isActive 
+                    ? 'bg-green-600/20 text-green-400 border-r-4 border-green-500' 
+                    : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'
+                }`}
+            >
+                <Icon size={20} />
+                <span className="font-medium text-sm">{label}</span>
+            </button>
+        );
+
+        // --- PAGES ---
+        const AuthPage = ({ onLogin }) => {
+            const [isLogin, setIsLogin] = useState(true);
+            const [formData, setFormData] = useState({ name: '', email: '', password: '' });
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                onLogin({ 
+                    uid: Date.now().toString(), 
+                    name: isLogin ? 'Usuário Família' : formData.name, 
+                    email: formData.email 
+                });
+            };
+
+            return (
+                <div className="flex h-screen w-full items-center justify-center bg-black p-4">
+                    <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 p-8 rounded-2xl shadow-2xl">
+                        <div className="text-center mb-8">
+                            <h1 className="text-4xl font-black text-white tracking-tighter mb-2">FIN<span className="text-green-500">HUB</span></h1>
+                            <p className="text-zinc-400 text-sm">{isLogin ? 'Bem-vindo de volta' : 'Crie a sua conta familiar'}</p>
+                        </div>
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            {!isLogin && (
+                                <div>
+                                    <label className="block text-sm text-zinc-400 mb-1">Nome Completo</label>
+                                    <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-lg p-3 focus:outline-none focus:border-green-500" />
+                                </div>
+                            )}
+                            <div>
+                                <label className="block text-sm text-zinc-400 mb-1">E-mail</label>
+                                <input type="email" required value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-lg p-3 focus:outline-none focus:border-green-500" />
+                            </div>
+                            <div>
+                                <label className="block text-sm text-zinc-400 mb-1">Senha</label>
+                                <input type="password" required value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-lg p-3 focus:outline-none focus:border-green-500" />
+                            </div>
+                            <button type="submit" className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg transition-colors flex items-center justify-center mt-6">
+                                <Lock size={18} className="mr-2" /> {isLogin ? 'Entrar Seguro' : 'Criar Conta'}
+                            </button>
+                        </form>
+                        <div className="mt-6 text-center">
+                            <button onClick={() => setIsLogin(!isLogin)} className="text-sm text-green-500 hover:text-green-400">
+                                {isLogin ? 'Não tem conta? Cadastre-se' : 'Já tem conta? Inicie sessão'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const SettingsPage = ({ user, categories, setCategories, onUpdateUser }) => {
+            const [newCat, setNewCat] = useState('');
+            const [name, setName] = useState(user.name);
+            const [password, setPassword] = useState('');
+
+            const handleAddCategory = (e) => {
+                e.preventDefault();
+                if (newCat.trim() && !categories.includes(newCat.trim())) {
+                    setCategories([...categories, newCat.trim()]);
+                    setNewCat('');
+                }
+            };
+
+            const handleDeleteCategory = (catToRemove) => {
+                if(window.confirm(`Deseja excluir a categoria "${catToRemove}"?`)) {
+                    setCategories(categories.filter(c => c !== catToRemove));
+                }
+            };
+
+            const handleUpdateProfile = (e) => {
+                e.preventDefault();
+                onUpdateUser({ ...user, name });
+                if (password) {
+                    alert('Senha atualizada com sucesso (Simulação Local)');
+                    setPassword('');
+                } else {
+                    alert('Perfil atualizado com sucesso!');
+                }
+            };
+
+            return (
+                <div className="max-w-4xl mx-auto space-y-8 pb-24 md:pb-0">
+                    <div>
+                        <h2 className="text-2xl font-bold text-white mb-1">Configurações</h2>
+                        <p className="text-zinc-400 text-sm">Faça a gestão da sua conta e personalize categorias.</p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl h-fit">
+                            <h3 className="text-white font-medium mb-6 flex items-center">
+                                <UserIcon size={18} className="mr-2 text-green-500"/> Dados da Conta
+                            </h3>
+                            <form onSubmit={handleUpdateProfile} className="space-y-4">
+                                <div>
+                                    <label className="block text-xs text-zinc-400 mb-1">Nome de Utilizador</label>
+                                    <input type="text" required value={name} onChange={e => setName(e.target.value)} className="w-full bg-black border border-zinc-800 text-white rounded-lg p-2 text-sm focus:border-green-500 outline-none" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-zinc-400 mb-1">E-mail (Imutável)</label>
+                                    <input type="email" disabled value={user.email} className="w-full bg-black border border-zinc-800 text-zinc-500 rounded-lg p-2 text-sm outline-none cursor-not-allowed" />
+                                </div>
+                                <div className="pt-4 border-t border-zinc-800">
+                                    <h4 className="text-sm font-medium text-white mb-4 flex items-center"><Key size={16} className="mr-2 text-zinc-400"/> Segurança</h4>
+                                    <label className="block text-xs text-zinc-400 mb-1">Nova Senha</label>
+                                    <input type="password" placeholder="Deixe em branco para manter" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-black border border-zinc-800 text-white rounded-lg p-2 text-sm focus:border-green-500 outline-none" />
+                                </div>
+                                <button type="submit" className="w-full bg-green-600 hover:bg-green-500 text-white text-sm font-bold py-2 rounded-lg transition-colors mt-4">
+                                    Salvar Perfil
+                                </button>
+                            </form>
+                        </div>
+                        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl">
+                            <h3 className="text-white font-medium mb-6 flex items-center">
+                                <Tag size={18} className="mr-2 text-green-500"/> Categorias de Despesa
+                            </h3>
+                            <form onSubmit={handleAddCategory} className="flex space-x-2 mb-6">
+                                <input type="text" placeholder="Nova Categoria..." value={newCat} onChange={e => setNewCat(e.target.value)} className="flex-1 bg-black border border-zinc-800 text-white rounded-lg p-2 text-sm focus:border-green-500 outline-none" />
+                                <button type="submit" className="bg-zinc-800 hover:bg-green-600 text-white px-4 rounded-lg transition-colors"><Plus size={18} /></button>
+                            </form>
+                            <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                                {categories.map(cat => (
+                                    <div key={cat} className="flex justify-between items-center p-3 bg-black rounded-lg border border-zinc-800">
+                                        <span className="text-sm text-white">{cat}</span>
+                                        <button onClick={() => handleDeleteCategory(cat)} className="text-zinc-500 hover:text-red-500 transition-colors"><Trash2 size={16} /></button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const BudgetChart = ({ plannedTransactions, availablePeriods }) => {
+            let runningTotal = 0;
+            const chartData = availablePeriods.map(period => {
+                const plans = plannedTransactions.filter(p => p.period === period);
+                const inc = plans.filter(p => p.type === 'income').reduce((s, p) => s + p.amount, 0);
+                const exp = plans.filter(p => p.type === 'expense').reduce((s, p) => s + p.amount, 0);
+                const balance = inc - exp;
+                runningTotal += balance;
+                return { period, inc, exp, balance, acc: runningTotal };
+            });
+
+            if (chartData.length === 0 || plannedTransactions.length === 0) return <div className="text-zinc-500 text-sm mt-4 text-center py-6 border border-dashed border-zinc-800 rounded-lg">Adicione meses e lançamentos para ver a projeção visual.</div>;
+
+            const maxBarValue = Math.max(...chartData.map(d => Math.max(d.inc, d.exp)), 100);
+            const maxAccValue = Math.max(...chartData.map(d => Math.abs(d.acc)), 100);
+            const height = 200;
+            const width = chartData.length * 80;
+            const barWidth = 16;
+            const gap = 4;
+            const scaleYBar = (height * 0.8) / maxBarValue;
+            const accMin = Math.min(0, ...chartData.map(d => d.acc));
+            const accMax = Math.max(0, ...chartData.map(d => d.acc));
+            const accRange = accMax - accMin || 1;
+            const zeroLineY = height - ((0 - accMin) / accRange) * height;
+
+            const linePoints = chartData.map((d, i) => {
+                const x = i * 80 + 40;
+                const y = height - ((d.acc - accMin) / accRange) * height;
+                return `${x},${y}`;
+            }).join(' ');
+
+            return (
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl mt-6 overflow-x-auto custom-scrollbar">
+                    <h3 className="text-white font-medium mb-6">Projeção do Orçamento</h3>
+                    <div className="relative" style={{ minWidth: `${Math.max(width, 400)}px` }}>
+                        <svg width="100%" height={height} style={{ overflow: 'visible' }}>
+                            {accMin < 0 && <line x1="0" y1={zeroLineY} x2="100%" y2={zeroLineY} stroke="#3f3f46" strokeDasharray="4 4" strokeWidth="1" />}
+                            {chartData.map((d, i) => {
+                                const xCenter = i * 80 + 40;
+                                const hInc = d.inc * scaleYBar;
+                                const hExp = d.exp * scaleYBar;
+                                return (
+                                    <g key={`bars-${i}`}>
+                                        <rect x={xCenter - barWidth - (gap/2)} y={height - hInc} width={barWidth} height={hInc} fill="#22c55e" rx="2" opacity="0.8" />
+                                        <rect x={xCenter + (gap/2)} y={height - hExp} width={barWidth} height={hExp} fill="#ef4444" rx="2" opacity="0.8" />
+                                    </g>
+                                );
+                            })}
+                            <polyline points={linePoints} fill="none" stroke="#3b82f6" strokeWidth="3" />
+                            {chartData.map((d, i) => (
+                                <circle key={`dot-${i}`} cx={i * 80 + 40} cy={height - ((d.acc - accMin) / accRange) * height} r="4" fill="#3b82f6" stroke="#18181b" strokeWidth="2" />
+                            ))}
+                        </svg>
+                        <div className="flex mt-4">
+                            {chartData.map((d, i) => (
+                                <div key={`label-${i}`} className="text-center text-[10px] text-zinc-500 font-medium" style={{ width: '80px' }}>
+                                    {formatPeriodLabel(d.period)}
+                                    <div className={`mt-1 font-bold ${d.acc >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
+                                        {d.acc >= 0 ? '+' : ''}{Math.round(d.acc)}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const BudgetSetup = ({ plannedTransactions, onAddPlannedTransactions, onUpdatePlannedTransaction, onDeletePlannedTransaction, expenseCategories }) => {
+            const currentYearMonth = new Date().toISOString().slice(0, 7);
+            const [availablePeriods, setAvailablePeriods] = useState(() => {
+                if (plannedTransactions.length === 0) return [currentYearMonth];
+                const periods = new Set(plannedTransactions.map(p => p.period));
+                return Array.from(periods).sort();
+            });
+            
+            const [selectedPeriod, setSelectedPeriod] = useState(availablePeriods[0]);
+            const [editingId, setEditingId] = useState(null);
+            const incomeCategories = ['Salário', 'Fonte diversa'];
+
+            const defaultForm = { type: 'expense', description: '', amount: '', category: expenseCategories[0] || 'Outros', isInstallment: false, installmentsCount: 2 };
+            const [formData, setFormData] = useState(defaultForm);
+
+            const activeCategoryList = formData.type === 'income' ? incomeCategories : expenseCategories;
+            const currentMonthPlans = useMemo(() => plannedTransactions.filter(p => p.period === selectedPeriod), [plannedTransactions, selectedPeriod]);
+
+            const totalExpense = currentMonthPlans.reduce((acc, curr) => curr.type === 'expense' ? acc + curr.amount : acc, 0);
+            const totalIncome = currentMonthPlans.reduce((acc, curr) => curr.type === 'income' ? acc + curr.amount : acc, 0);
+            const balance = totalIncome - totalExpense;
+
+            const handleAddMonth = () => {
+                const lastPeriod = availablePeriods[availablePeriods.length - 1];
+                const nextPeriod = addMonthsToPeriod(lastPeriod, 1);
+                if (!availablePeriods.includes(nextPeriod)) {
+                    setAvailablePeriods([...availablePeriods, nextPeriod].sort());
+                    setSelectedPeriod(nextPeriod);
+                }
+            };
+
+            const handleTypeChange = (newType) => setFormData({...formData, type: newType, category: newType === 'income' ? incomeCategories[0] : (expenseCategories[0] || 'Outros')});
+
+            const handleEdit = (item) => {
+                setEditingId(item.id);
+                setFormData({ type: item.type, description: item.description, amount: item.amount, category: item.category, isInstallment: false, installmentsCount: 2 });
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                const baseAmount = parseFloat(formData.amount);
+                if (isNaN(baseAmount)) return;
+
+                if (editingId) {
+                    onUpdatePlannedTransaction(editingId, { ...formData, amount: baseAmount, period: selectedPeriod });
+                    setEditingId(null);
+                    setFormData(defaultForm);
+                    return;
+                }
+
+                let newPlans = [];
+                if (formData.isInstallment && formData.installmentsCount > 1 && formData.type === 'expense') {
+                    for (let i = 0; i < formData.installmentsCount; i++) {
+                        const targetPeriod = addMonthsToPeriod(selectedPeriod, i);
+                        newPlans.push({
+                            id: Date.now() + i, type: formData.type, category: formData.category, amount: baseAmount, period: targetPeriod,
+                            description: `${formData.description} (${i + 1}/${formData.installmentsCount})`, isInstallment: true
+                        });
+                        if (!availablePeriods.includes(targetPeriod)) setAvailablePeriods(prev => Array.from(new Set([...prev, targetPeriod])).sort());
+                    }
+                } else {
+                    newPlans.push({ id: Date.now(), type: formData.type, category: formData.category, amount: baseAmount, period: selectedPeriod, description: formData.description, isInstallment: false });
+                }
+                onAddPlannedTransactions(newPlans);
+                setFormData(defaultForm);
+            };
+
+            return (
+                <div className="space-y-6 pb-24 md:pb-0">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+                        <div>
+                            <h2 className="text-xl font-bold text-white mb-1">Painel de Orçamento</h2>
+                            <p className="text-zinc-400 text-sm">Projeção e planeamento financeiro detalhado.</p>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                            <div className="flex items-center space-x-2 bg-black border border-zinc-800 rounded-lg p-1">
+                                <Calendar size={18} className="text-zinc-400 ml-2" />
+                                <select className="bg-transparent text-white p-2 outline-none font-medium" value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)}>
+                                    {availablePeriods.map(p => <option key={p} value={p}>{formatPeriodLabel(p)} ({p})</option>)}
+                                </select>
+                            </div>
+                            <button onClick={handleAddMonth} className="flex items-center px-3 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg transition-colors border border-zinc-700">
+                                <Plus size={18} className="md:mr-2" /><span className="hidden md:inline text-sm font-medium">Add Mês</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-1 bg-zinc-900 border border-zinc-800 p-6 rounded-xl h-fit">
+                            <h3 className="text-white font-medium mb-4 flex items-center">
+                                {editingId ? <Edit2 size={18} className="mr-2 text-blue-500"/> : <ListPlus size={18} className="mr-2 text-green-500"/>}
+                                {editingId ? 'Editar Previsão' : 'Nova Previsão'}
+                            </h3>
+                            <form onSubmit={handleSubmit} className="space-y-4">
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label className="block text-xs text-zinc-400 mb-1">Tipo</label>
+                                        <select className={`w-full bg-black border border-zinc-800 text-white rounded-lg p-2 text-sm outline-none focus:border-green-500 ${formData.type === 'income' ? 'text-green-400' : 'text-red-400'}`} value={formData.type} onChange={e => handleTypeChange(e.target.value)}>
+                                            <option value="expense">Despesa</option>
+                                            <option value="income">Receita</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-zinc-400 mb-1">Valor (€)</label>
+                                        <input type="number" step="0.01" required placeholder="0.00" className="w-full bg-black border border-zinc-800 text-white rounded-lg p-2 text-sm focus:border-green-500 outline-none" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-zinc-400 mb-1">Descrição</label>
+                                    <input type="text" required placeholder="Ex: Conta da Luz" className="w-full bg-black border border-zinc-800 text-white rounded-lg p-2 text-sm focus:border-green-500 outline-none" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-zinc-400 mb-1">Categoria</label>
+                                    <select className="w-full bg-black border border-zinc-800 text-white rounded-lg p-2 text-sm focus:border-green-500 outline-none" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
+                                        {activeCategoryList.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                </div>
+                                {!editingId && formData.type === 'expense' && (
+                                    <div className="pt-2">
+                                        <label className="flex items-center space-x-2 text-sm text-zinc-300 cursor-pointer">
+                                            <input type="checkbox" className="rounded bg-zinc-800 border-zinc-700 text-green-500 focus:ring-green-500" checked={formData.isInstallment} onChange={e => setFormData({...formData, isInstallment: e.target.checked})} />
+                                            <span>Compra parcelada?</span>
+                                        </label>
+                                        {formData.isInstallment && (
+                                            <div className="bg-black p-3 rounded-lg border border-zinc-800 mt-2">
+                                                <label className="block text-xs text-zinc-400 mb-1">Quantidade de Meses</label>
+                                                <input type="number" min="2" max="48" className="w-full bg-zinc-900 border border-zinc-700 text-white rounded-lg p-2 text-sm outline-none" value={formData.installmentsCount} onChange={e => setFormData({...formData, installmentsCount: parseInt(e.target.value)})} />
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                <div className="flex space-x-2 pt-2">
+                                    {editingId && <button type="button" onClick={() => { setEditingId(null); setFormData(defaultForm); }} className="w-1/3 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-bold py-2 rounded-lg transition-colors border border-zinc-700">Cancelar</button>}
+                                    <button type="submit" className={`flex-1 text-white text-sm font-bold py-2 rounded-lg transition-colors ${editingId ? 'bg-blue-600 hover:bg-blue-500' : 'bg-green-600 hover:bg-green-500'}`}>
+                                        {editingId ? 'Salvar Alterações' : 'Salvar Orçamento'}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <div className="lg:col-span-2 space-y-4">
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+                                    <p className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1">Receitas Previstas</p>
+                                    <p className="text-lg font-bold text-green-400">€ {totalIncome.toLocaleString('pt-PT', {minimumFractionDigits: 2})}</p>
+                                </div>
+                                <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+                                    <p className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1">Despesas Previstas</p>
+                                    <p className="text-lg font-bold text-red-400">€ {totalExpense.toLocaleString('pt-PT', {minimumFractionDigits: 2})}</p>
+                                </div>
+                                <div className={`border p-4 rounded-xl ${balance >= 0 ? 'bg-blue-900/10 border-blue-900/30' : 'bg-red-900/10 border-red-900/30'}`}>
+                                    <p className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1">Saldo do Mês</p>
+                                    <p className={`text-lg font-bold ${balance >= 0 ? 'text-blue-400' : 'text-red-400'}`}>€ {balance.toLocaleString('pt-PT', {minimumFractionDigits: 2})}</p>
+                                </div>
+                            </div>
+                            <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-white font-medium">Detalhes ({formatPeriodLabel(selectedPeriod)})</h3>
+                                </div>
+                                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                                    {currentMonthPlans.length === 0 ? <p className="text-zinc-500 text-sm text-center py-8">Nenhum item orçado para este mês.</p> : (
+                                        currentMonthPlans.map(item => (
+                                            <div key={item.id} className="flex justify-between items-center p-3 bg-black rounded-lg border border-zinc-800 hover:border-zinc-700 transition-colors group">
+                                                <div className="flex items-center space-x-3">
+                                                    <div className={`p-2 rounded-lg ${item.type === 'income' ? 'bg-green-500/10 text-green-500' : 'bg-zinc-900 text-zinc-400'}`}>
+                                                        {item.type === 'income' ? <TrendingUp size={16} /> : <Tag size={16} />}
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-medium text-white">{item.description}</p>
+                                                        <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{item.category}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center space-x-4">
+                                                    <span className={`font-medium ${item.type === 'expense' ? 'text-red-400' : 'text-green-400'}`}>
+                                                        {item.type === 'expense' ? '-' : '+'}€ {item.amount.toLocaleString('pt-PT', {minimumFractionDigits: 2})}
+                                                    </span>
+                                                    <div className="flex space-x-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <button onClick={() => handleEdit(item)} className="p-1.5 bg-zinc-800 hover:bg-blue-600 text-zinc-400 hover:text-white rounded transition-colors"><Edit2 size={14} /></button>
+                                                        <button onClick={() => onDeletePlannedTransaction(item.id)} className="p-1.5 bg-zinc-800 hover:bg-red-600 text-zinc-400 hover:text-white rounded transition-colors"><Trash2 size={14} /></button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <BudgetChart plannedTransactions={plannedTransactions} availablePeriods={availablePeriods} />
+                </div>
+            );
+        };
+
+        // --- MAIN APP COMPONENT ---
+        const App = () => {
+            const [user, setUser] = useState(null); 
+            const [isMobile, setIsMobile] = useState(false);
+            const [currentTab, setCurrentTab] = useState('budget');
+            
+            const [plannedTransactions, setPlannedTransactions] = useState([]);
+            const [expenseCategories, setExpenseCategories] = useState(INITIAL_CATEGORIES);
+
+            useEffect(() => {
+                const handleResize = () => setIsMobile(window.innerWidth < 768);
+                handleResize(); 
+                window.addEventListener('resize', handleResize);
+                return () => window.removeEventListener('resize', handleResize);
+            }, []);
+
+            if (!user) return <AuthPage onLogin={setUser} />;
+
+            return (
+                <div className="flex h-screen bg-black font-sans overflow-hidden">
+                    {!isMobile && (
+                        <aside className="w-64 bg-zinc-950 border-r border-zinc-900 flex flex-col z-20">
+                            <div className="p-6">
+                                <h1 className="text-2xl font-black text-white tracking-tighter">FIN<span className="text-green-500">HUB</span></h1>
+                                <p className="text-xs text-zinc-500 mt-1">Gestão Familiar Avançada</p>
+                            </div>
+                            <nav className="flex-1 px-4 space-y-2 overflow-y-auto custom-scrollbar">
+                                <SidebarItem icon={Target} label="Orçamento" isActive={currentTab === 'budget'} onClick={() => setCurrentTab('budget')} />
+                                <SidebarItem icon={Settings} label="Configurações" isActive={currentTab === 'settings'} onClick={() => setCurrentTab('settings')} />
+                            </nav>
+                            <div className="p-4 border-t border-zinc-900 flex items-center justify-between">
+                                <div className="flex items-center space-x-3">
+                                    <div className="w-8 h-8 rounded-full bg-green-900 flex items-center justify-center text-green-400 font-bold border border-green-700">{user.name.charAt(0).toUpperCase()}</div>
+                                    <div className="overflow-hidden">
+                                        <p className="text-sm font-medium text-white truncate w-24">{user.name}</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => setUser(null)} className="text-zinc-500 hover:text-red-400"><LogOut size={18} /></button>
+                            </div>
+                        </aside>
+                    )}
+
+                    <main className="flex-1 overflow-y-auto bg-black text-zinc-100 relative">
+                        <div className="p-4 md:p-8">
+                            {currentTab === 'budget' && (
+                                <BudgetSetup 
+                                    plannedTransactions={plannedTransactions} 
+                                    onAddPlannedTransactions={(newPlans) => setPlannedTransactions(prev => [...prev, ...newPlans])} 
+                                    onUpdatePlannedTransaction={(id, updatedData) => setPlannedTransactions(prev => prev.map(item => item.id === id ? { ...item, ...updatedData } : item))}
+                                    onDeletePlannedTransaction={(id) => { if(window.confirm('Excluir este lançamento orçamentário?')) setPlannedTransactions(prev => prev.filter(item => item.id !== id)); }}
+                                    expenseCategories={expenseCategories}
+                                />
+                            )}
+                            {currentTab === 'settings' && (
+                                <SettingsPage user={user} categories={expenseCategories} setCategories={setExpenseCategories} onUpdateUser={setUser} />
+                            )}
+                        </div>
+                        
+                        {isMobile && (
+                            <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950 border-t border-zinc-900 flex justify-around p-3 pb-safe z-20 shadow-[0_-4px_15px_rgba(0,0,0,0.5)]">
+                                <button onClick={() => setCurrentTab('budget')} className={`flex flex-col items-center p-2 ${currentTab === 'budget' ? 'text-green-500' : 'text-zinc-500'}`}><Target size={24} /><span className="text-[10px] mt-1 font-medium">Orçamento</span></button>
+                                <button onClick={() => setCurrentTab('settings')} className={`flex flex-col items-center p-2 ${currentTab === 'settings' ? 'text-green-500' : 'text-zinc-500'}`}><Settings size={24} /><span className="text-[10px] mt-1 font-medium">Configurações</span></button>
+                            </nav>
+                        )}
+                    </main>
+                </div>
+            );
+        };
+
+        // Renderização Inicial
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
