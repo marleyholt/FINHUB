@@ -12,7 +12,6 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <style>
-        /* Estilos base e scrollbar customizada para ficar premium */
         body { margin: 0; background-color: #000; color: #fff; font-family: system-ui, -apple-system, sans-serif; }
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
@@ -22,18 +21,36 @@
     </style>
 </head>
 <body>
-    <!-- Onde o React vai ser renderizado -->
     <div id="root"></div>
 
-    <!-- O Código React (Módulos importados via esm.sh) -->
     <script type="text/babel" data-type="module">
         import React, { useState, useMemo, useEffect } from "https://esm.sh/react@18";
         import { createRoot } from "https://esm.sh/react-dom@18/client";
         import { 
             LayoutDashboard, TrendingDown, TrendingUp, DollarSign,
             PieChart, Target, LogOut, Lock, Calendar, ListPlus,
-            Tag, Trash2, Edit2, Plus, Settings, User as UserIcon, Key
+            Tag, Trash2, Edit2, Plus, Settings, User as UserIcon, Key, Loader2
         } from "https://esm.sh/lucide-react@0.263.1";
+
+        // --- FIREBASE IMPORTS ---
+        import { initializeApp } from "https://esm.sh/firebase@10.8.0/app";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, updateProfile, updatePassword } from "https://esm.sh/firebase@10.8.0/auth";
+        import { getFirestore, collection, doc, setDoc, onSnapshot, deleteDoc, updateDoc, writeBatch } from "https://esm.sh/firebase@10.8.0/firestore";
+
+        // --- FIREBASE CONFIGURATION (Suas Chaves) ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyAWsiRWFynuzmmVWtijPPugnZiA27Kus5I",
+            authDomain: "finlhub.firebaseapp.com",
+            projectId: "finlhub",
+            storageBucket: "finlhub.firebasestorage.app",
+            messagingSenderId: "80100152503",
+            appId: "1:80100152503:web:25bec2eba2315d79e0a932",
+            measurementId: "G-H5BFZXXT88"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
 
         // --- INITIAL STATE ---
         const INITIAL_CATEGORIES = ['Habitação', 'Alimentação', 'Lazer', 'Transporte', 'Saúde', 'Educação', 'Outros'];
@@ -55,31 +72,37 @@
 
         // --- COMPONENTS ---
         const SidebarItem = ({ icon: Icon, label, isActive, onClick }) => (
-            <button 
-                onClick={onClick}
-                className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors duration-200 ${
-                isActive 
-                    ? 'bg-green-600/20 text-green-400 border-r-4 border-green-500' 
-                    : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'
-                }`}
-            >
+            <button onClick={onClick} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors duration-200 ${isActive ? 'bg-green-600/20 text-green-400 border-r-4 border-green-500' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'}`}>
                 <Icon size={20} />
                 <span className="font-medium text-sm">{label}</span>
             </button>
         );
 
         // --- PAGES ---
-        const AuthPage = ({ onLogin }) => {
+        const AuthPage = () => {
             const [isLogin, setIsLogin] = useState(true);
             const [formData, setFormData] = useState({ name: '', email: '', password: '' });
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
 
-            const handleSubmit = (e) => {
+            const handleSubmit = async (e) => {
                 e.preventDefault();
-                onLogin({ 
-                    uid: Date.now().toString(), 
-                    name: isLogin ? 'Usuário Família' : formData.name, 
-                    email: formData.email 
-                });
+                setLoading(true);
+                setError('');
+                try {
+                    if (isLogin) {
+                        await signInWithEmailAndPassword(auth, formData.email, formData.password);
+                    } else {
+                        const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+                        await updateProfile(userCredential.user, { displayName: formData.name });
+                        // Criar categorias padrão para o novo usuário
+                        await setDoc(doc(db, 'users', userCredential.user.uid, 'settings', 'categories'), { list: INITIAL_CATEGORIES });
+                    }
+                } catch (err) {
+                    setError(err.message.includes('auth/') ? 'Credenciais inválidas ou e-mail já em uso.' : 'Erro ao autenticar.');
+                } finally {
+                    setLoading(false);
+                }
             };
 
             return (
@@ -89,6 +112,9 @@
                             <h1 className="text-4xl font-black text-white tracking-tighter mb-2">FIN<span className="text-green-500">HUB</span></h1>
                             <p className="text-zinc-400 text-sm">{isLogin ? 'Bem-vindo de volta' : 'Crie a sua conta familiar'}</p>
                         </div>
+                        
+                        {error && <div className="bg-red-500/10 border border-red-500/50 text-red-500 text-sm p-3 rounded-lg mb-4 text-center">{error}</div>}
+
                         <form onSubmit={handleSubmit} className="space-y-4">
                             {!isLogin && (
                                 <div>
@@ -101,15 +127,15 @@
                                 <input type="email" required value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-lg p-3 focus:outline-none focus:border-green-500" />
                             </div>
                             <div>
-                                <label className="block text-sm text-zinc-400 mb-1">Senha</label>
+                                <label className="block text-sm text-zinc-400 mb-1">Senha (Mín. 6 chars)</label>
                                 <input type="password" required value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-lg p-3 focus:outline-none focus:border-green-500" />
                             </div>
-                            <button type="submit" className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg transition-colors flex items-center justify-center mt-6">
-                                <Lock size={18} className="mr-2" /> {isLogin ? 'Entrar Seguro' : 'Criar Conta'}
+                            <button type="submit" disabled={loading} className="w-full bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg transition-colors flex items-center justify-center mt-6">
+                                {loading ? <Loader2 className="animate-spin" size={18} /> : <><Lock size={18} className="mr-2" /> {isLogin ? 'Entrar Seguro' : 'Criar Conta'}</>}
                             </button>
                         </form>
                         <div className="mt-6 text-center">
-                            <button onClick={() => setIsLogin(!isLogin)} className="text-sm text-green-500 hover:text-green-400">
+                            <button onClick={() => { setIsLogin(!isLogin); setError(''); }} className="text-sm text-green-500 hover:text-green-400">
                                 {isLogin ? 'Não tem conta? Cadastre-se' : 'Já tem conta? Inicie sessão'}
                             </button>
                         </div>
@@ -118,33 +144,39 @@
             );
         };
 
-        const SettingsPage = ({ user, categories, setCategories, onUpdateUser }) => {
+        const SettingsPage = ({ user, categories }) => {
             const [newCat, setNewCat] = useState('');
-            const [name, setName] = useState(user.name);
+            const [name, setName] = useState(user.displayName || 'Utilizador');
             const [password, setPassword] = useState('');
+            const [msg, setMsg] = useState({ text: '', type: '' });
 
-            const handleAddCategory = (e) => {
+            const handleAddCategory = async (e) => {
                 e.preventDefault();
                 if (newCat.trim() && !categories.includes(newCat.trim())) {
-                    setCategories([...categories, newCat.trim()]);
+                    const updatedCats = [...categories, newCat.trim()];
+                    await setDoc(doc(db, 'users', user.uid, 'settings', 'categories'), { list: updatedCats });
                     setNewCat('');
                 }
             };
 
-            const handleDeleteCategory = (catToRemove) => {
-                if(window.confirm(`Deseja excluir a categoria "${catToRemove}"?`)) {
-                    setCategories(categories.filter(c => c !== catToRemove));
-                }
+            const handleDeleteCategory = async (catToRemove) => {
+                const updatedCats = categories.filter(c => c !== catToRemove);
+                await setDoc(doc(db, 'users', user.uid, 'settings', 'categories'), { list: updatedCats });
             };
 
-            const handleUpdateProfile = (e) => {
+            const handleUpdateProfile = async (e) => {
                 e.preventDefault();
-                onUpdateUser({ ...user, name });
-                if (password) {
-                    alert('Senha atualizada com sucesso (Simulação Local)');
-                    setPassword('');
-                } else {
-                    alert('Perfil atualizado com sucesso!');
+                setMsg({ text: 'A atualizar...', type: 'info' });
+                try {
+                    await updateProfile(auth.currentUser, { displayName: name });
+                    if (password) {
+                        await updatePassword(auth.currentUser, password);
+                        setPassword('');
+                    }
+                    setMsg({ text: 'Perfil atualizado com sucesso!', type: 'success' });
+                    setTimeout(() => setMsg({text: '', type: ''}), 3000);
+                } catch (error) {
+                    setMsg({ text: 'Erro ao atualizar. Se alterou a senha, tente refazer o login.', type: 'error' });
                 }
             };
 
@@ -154,11 +186,16 @@
                         <h2 className="text-2xl font-bold text-white mb-1">Configurações</h2>
                         <p className="text-zinc-400 text-sm">Faça a gestão da sua conta e personalize categorias.</p>
                     </div>
+                    
+                    {msg.text && (
+                        <div className={`p-3 rounded-lg text-sm border ${msg.type === 'error' ? 'bg-red-500/10 border-red-500/50 text-red-500' : 'bg-green-500/10 border-green-500/50 text-green-500'}`}>
+                            {msg.text}
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl h-fit">
-                            <h3 className="text-white font-medium mb-6 flex items-center">
-                                <UserIcon size={18} className="mr-2 text-green-500"/> Dados da Conta
-                            </h3>
+                            <h3 className="text-white font-medium mb-6 flex items-center"><UserIcon size={18} className="mr-2 text-green-500"/> Dados da Conta</h3>
                             <form onSubmit={handleUpdateProfile} className="space-y-4">
                                 <div>
                                     <label className="block text-xs text-zinc-400 mb-1">Nome de Utilizador</label>
@@ -173,15 +210,11 @@
                                     <label className="block text-xs text-zinc-400 mb-1">Nova Senha</label>
                                     <input type="password" placeholder="Deixe em branco para manter" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-black border border-zinc-800 text-white rounded-lg p-2 text-sm focus:border-green-500 outline-none" />
                                 </div>
-                                <button type="submit" className="w-full bg-green-600 hover:bg-green-500 text-white text-sm font-bold py-2 rounded-lg transition-colors mt-4">
-                                    Salvar Perfil
-                                </button>
+                                <button type="submit" className="w-full bg-green-600 hover:bg-green-500 text-white text-sm font-bold py-2 rounded-lg transition-colors mt-4">Salvar Perfil</button>
                             </form>
                         </div>
                         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl">
-                            <h3 className="text-white font-medium mb-6 flex items-center">
-                                <Tag size={18} className="mr-2 text-green-500"/> Categorias de Despesa
-                            </h3>
+                            <h3 className="text-white font-medium mb-6 flex items-center"><Tag size={18} className="mr-2 text-green-500"/> Categorias de Despesa</h3>
                             <form onSubmit={handleAddCategory} className="flex space-x-2 mb-6">
                                 <input type="text" placeholder="Nova Categoria..." value={newCat} onChange={e => setNewCat(e.target.value)} className="flex-1 bg-black border border-zinc-800 text-white rounded-lg p-2 text-sm focus:border-green-500 outline-none" />
                                 <button type="submit" className="bg-zinc-800 hover:bg-green-600 text-white px-4 rounded-lg transition-colors"><Plus size={18} /></button>
@@ -214,7 +247,6 @@
             if (chartData.length === 0 || plannedTransactions.length === 0) return <div className="text-zinc-500 text-sm mt-4 text-center py-6 border border-dashed border-zinc-800 rounded-lg">Adicione meses e lançamentos para ver a projeção visual.</div>;
 
             const maxBarValue = Math.max(...chartData.map(d => Math.max(d.inc, d.exp)), 100);
-            const maxAccValue = Math.max(...chartData.map(d => Math.abs(d.acc)), 100);
             const height = 200;
             const width = chartData.length * 80;
             const barWidth = 16;
@@ -268,15 +300,14 @@
             );
         };
 
-        const BudgetSetup = ({ plannedTransactions, onAddPlannedTransactions, onUpdatePlannedTransaction, onDeletePlannedTransaction, expenseCategories }) => {
+        const BudgetSetup = ({ user, plannedTransactions, expenseCategories }) => {
             const currentYearMonth = new Date().toISOString().slice(0, 7);
-            const [availablePeriods, setAvailablePeriods] = useState(() => {
+            const availablePeriods = useMemo(() => {
                 if (plannedTransactions.length === 0) return [currentYearMonth];
-                const periods = new Set(plannedTransactions.map(p => p.period));
-                return Array.from(periods).sort();
-            });
+                return Array.from(new Set(plannedTransactions.map(p => p.period))).sort();
+            }, [plannedTransactions]);
             
-            const [selectedPeriod, setSelectedPeriod] = useState(availablePeriods[0]);
+            const [selectedPeriod, setSelectedPeriod] = useState(currentYearMonth);
             const [editingId, setEditingId] = useState(null);
             const incomeCategories = ['Salário', 'Fonte diversa'];
 
@@ -290,13 +321,17 @@
             const totalIncome = currentMonthPlans.reduce((acc, curr) => curr.type === 'income' ? acc + curr.amount : acc, 0);
             const balance = totalIncome - totalExpense;
 
-            const handleAddMonth = () => {
-                const lastPeriod = availablePeriods[availablePeriods.length - 1];
-                const nextPeriod = addMonthsToPeriod(lastPeriod, 1);
-                if (!availablePeriods.includes(nextPeriod)) {
-                    setAvailablePeriods([...availablePeriods, nextPeriod].sort());
-                    setSelectedPeriod(nextPeriod);
+            // Garantir que selectedPeriod é válido quando availablePeriods muda
+            useEffect(() => {
+                if (!availablePeriods.includes(selectedPeriod)) {
+                    setSelectedPeriod(availablePeriods[0] || currentYearMonth);
                 }
+            }, [availablePeriods]);
+
+            const handleAddMonth = () => {
+                const lastPeriod = availablePeriods[availablePeriods.length - 1] || currentYearMonth;
+                const nextPeriod = addMonthsToPeriod(lastPeriod, 1);
+                setSelectedPeriod(nextPeriod);
             };
 
             const handleTypeChange = (newType) => setFormData({...formData, type: newType, category: newType === 'income' ? incomeCategories[0] : (expenseCategories[0] || 'Outros')});
@@ -306,32 +341,40 @@
                 setFormData({ type: item.type, description: item.description, amount: item.amount, category: item.category, isInstallment: false, installmentsCount: 2 });
             };
 
-            const handleSubmit = (e) => {
+            const handleDelete = async (id) => {
+                await deleteDoc(doc(db, 'users', user.uid, 'plannedTransactions', id));
+            };
+
+            const handleSubmit = async (e) => {
                 e.preventDefault();
                 const baseAmount = parseFloat(formData.amount);
                 if (isNaN(baseAmount)) return;
 
                 if (editingId) {
-                    onUpdatePlannedTransaction(editingId, { ...formData, amount: baseAmount, period: selectedPeriod });
+                    await updateDoc(doc(db, 'users', user.uid, 'plannedTransactions', editingId), { ...formData, amount: baseAmount, period: selectedPeriod });
                     setEditingId(null);
                     setFormData(defaultForm);
                     return;
                 }
 
-                let newPlans = [];
                 if (formData.isInstallment && formData.installmentsCount > 1 && formData.type === 'expense') {
+                    const batch = writeBatch(db);
                     for (let i = 0; i < formData.installmentsCount; i++) {
                         const targetPeriod = addMonthsToPeriod(selectedPeriod, i);
-                        newPlans.push({
-                            id: Date.now() + i, type: formData.type, category: formData.category, amount: baseAmount, period: targetPeriod,
+                        const newId = Date.now().toString() + i;
+                        const docRef = doc(db, 'users', user.uid, 'plannedTransactions', newId);
+                        batch.set(docRef, {
+                            type: formData.type, category: formData.category, amount: baseAmount, period: targetPeriod,
                             description: `${formData.description} (${i + 1}/${formData.installmentsCount})`, isInstallment: true
                         });
-                        if (!availablePeriods.includes(targetPeriod)) setAvailablePeriods(prev => Array.from(new Set([...prev, targetPeriod])).sort());
                     }
+                    await batch.commit();
                 } else {
-                    newPlans.push({ id: Date.now(), type: formData.type, category: formData.category, amount: baseAmount, period: selectedPeriod, description: formData.description, isInstallment: false });
+                    const newId = Date.now().toString();
+                    await setDoc(doc(db, 'users', user.uid, 'plannedTransactions', newId), {
+                        type: formData.type, category: formData.category, amount: baseAmount, period: selectedPeriod, description: formData.description, isInstallment: false
+                    });
                 }
-                onAddPlannedTransactions(newPlans);
                 setFormData(defaultForm);
             };
 
@@ -346,6 +389,7 @@
                             <div className="flex items-center space-x-2 bg-black border border-zinc-800 rounded-lg p-1">
                                 <Calendar size={18} className="text-zinc-400 ml-2" />
                                 <select className="bg-transparent text-white p-2 outline-none font-medium" value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)}>
+                                    {availablePeriods.includes(selectedPeriod) ? null : <option value={selectedPeriod}>{formatPeriodLabel(selectedPeriod)}</option>}
                                     {availablePeriods.map(p => <option key={p} value={p}>{formatPeriodLabel(p)} ({p})</option>)}
                                 </select>
                             </div>
@@ -446,7 +490,7 @@
                                                     </span>
                                                     <div className="flex space-x-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
                                                         <button onClick={() => handleEdit(item)} className="p-1.5 bg-zinc-800 hover:bg-blue-600 text-zinc-400 hover:text-white rounded transition-colors"><Edit2 size={14} /></button>
-                                                        <button onClick={() => onDeletePlannedTransaction(item.id)} className="p-1.5 bg-zinc-800 hover:bg-red-600 text-zinc-400 hover:text-white rounded transition-colors"><Trash2 size={14} /></button>
+                                                        <button onClick={() => handleDelete(item.id)} className="p-1.5 bg-zinc-800 hover:bg-red-600 text-zinc-400 hover:text-white rounded transition-colors"><Trash2 size={14} /></button>
                                                     </div>
                                                 </div>
                                             </div>
@@ -464,11 +508,45 @@
         // --- MAIN APP COMPONENT ---
         const App = () => {
             const [user, setUser] = useState(null); 
+            const [authLoading, setAuthLoading] = useState(true);
             const [isMobile, setIsMobile] = useState(false);
             const [currentTab, setCurrentTab] = useState('budget');
             
             const [plannedTransactions, setPlannedTransactions] = useState([]);
             const [expenseCategories, setExpenseCategories] = useState(INITIAL_CATEGORIES);
+
+            // Escuta as mudanças de Autenticação em Tempo Real
+            useEffect(() => {
+                const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+                    setUser(currentUser);
+                    setAuthLoading(false);
+                });
+                return () => unsubscribe();
+            }, []);
+
+            // Busca os dados do Firestore em Tempo Real
+            useEffect(() => {
+                if (!user) {
+                    setPlannedTransactions([]);
+                    setExpenseCategories(INITIAL_CATEGORIES);
+                    return;
+                }
+
+                // Listener de Lançamentos
+                const unsubPlans = onSnapshot(collection(db, 'users', user.uid, 'plannedTransactions'), (snapshot) => {
+                    const plans = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setPlannedTransactions(plans);
+                });
+
+                // Listener de Categorias
+                const unsubCats = onSnapshot(doc(db, 'users', user.uid, 'settings', 'categories'), (docSnap) => {
+                    if (docSnap.exists() && docSnap.data().list) {
+                        setExpenseCategories(docSnap.data().list);
+                    }
+                });
+
+                return () => { unsubPlans(); unsubCats(); };
+            }, [user]);
 
             useEffect(() => {
                 const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -477,7 +555,11 @@
                 return () => window.removeEventListener('resize', handleResize);
             }, []);
 
-            if (!user) return <AuthPage onLogin={setUser} />;
+            if (authLoading) {
+                return <div className="flex h-screen items-center justify-center bg-black text-green-500"><Loader2 className="animate-spin" size={48} /></div>;
+            }
+
+            if (!user) return <AuthPage />;
 
             return (
                 <div className="flex h-screen bg-black font-sans overflow-hidden">
@@ -493,12 +575,14 @@
                             </nav>
                             <div className="p-4 border-t border-zinc-900 flex items-center justify-between">
                                 <div className="flex items-center space-x-3">
-                                    <div className="w-8 h-8 rounded-full bg-green-900 flex items-center justify-center text-green-400 font-bold border border-green-700">{user.name.charAt(0).toUpperCase()}</div>
+                                    <div className="w-8 h-8 rounded-full bg-green-900 flex items-center justify-center text-green-400 font-bold border border-green-700">
+                                        {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
+                                    </div>
                                     <div className="overflow-hidden">
-                                        <p className="text-sm font-medium text-white truncate w-24">{user.name}</p>
+                                        <p className="text-sm font-medium text-white truncate w-24">{user.displayName || 'Utilizador'}</p>
                                     </div>
                                 </div>
-                                <button onClick={() => setUser(null)} className="text-zinc-500 hover:text-red-400"><LogOut size={18} /></button>
+                                <button onClick={() => signOut(auth)} className="text-zinc-500 hover:text-red-400"><LogOut size={18} /></button>
                             </div>
                         </aside>
                     )}
@@ -506,16 +590,10 @@
                     <main className="flex-1 overflow-y-auto bg-black text-zinc-100 relative">
                         <div className="p-4 md:p-8">
                             {currentTab === 'budget' && (
-                                <BudgetSetup 
-                                    plannedTransactions={plannedTransactions} 
-                                    onAddPlannedTransactions={(newPlans) => setPlannedTransactions(prev => [...prev, ...newPlans])} 
-                                    onUpdatePlannedTransaction={(id, updatedData) => setPlannedTransactions(prev => prev.map(item => item.id === id ? { ...item, ...updatedData } : item))}
-                                    onDeletePlannedTransaction={(id) => { if(window.confirm('Excluir este lançamento orçamentário?')) setPlannedTransactions(prev => prev.filter(item => item.id !== id)); }}
-                                    expenseCategories={expenseCategories}
-                                />
+                                <BudgetSetup user={user} plannedTransactions={plannedTransactions} expenseCategories={expenseCategories} />
                             )}
                             {currentTab === 'settings' && (
-                                <SettingsPage user={user} categories={expenseCategories} setCategories={setExpenseCategories} onUpdateUser={setUser} />
+                                <SettingsPage user={user} categories={expenseCategories} />
                             )}
                         </div>
                         
@@ -530,7 +608,6 @@
             );
         };
 
-        // Renderização Inicial
         const root = createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
