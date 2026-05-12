@@ -94,29 +94,22 @@
                     if (isLogin) {
                         await signInWithEmailAndPassword(auth, formData.email, formData.password);
                     } else {
-                        // 1. Tenta criar o utilizador
                         const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
-                        
                         try {
-                            // 2. Tenta guardar o nome e categorias iniciais
                             await updateProfile(userCredential.user, { displayName: formData.name });
                             await setDoc(doc(db, 'users', userCredential.user.uid, 'settings', 'categories'), { list: INITIAL_CATEGORIES });
                         } catch (firestoreErr) {
                             console.error("Aviso: Utilizador criado, mas falhou ao guardar definições no Firestore:", firestoreErr);
-                            // Não bloqueia o login se o erro for apenas da base de dados
                         }
                     }
                 } catch (err) {
                     console.error("Erro detalhado do Firebase:", err);
-                    
-                    // Tradução dos erros mais comuns do Firebase para ajudar na depuração
                     let msgErro = "Erro desconhecido: " + err.message;
                     if (err.code === 'auth/email-already-in-use') msgErro = 'Este e-mail já está registado. Tente iniciar sessão.';
                     else if (err.code === 'auth/invalid-credential') msgErro = 'Palavra-passe incorreta ou e-mail não encontrado.';
                     else if (err.code === 'auth/weak-password') msgErro = 'A palavra-passe é muito fraca (mínimo de 6 caracteres).';
                     else if (err.code === 'auth/operation-not-allowed') msgErro = 'Autenticação por E-mail/Palavra-passe não está ativada no painel do Firebase!';
                     else if (err.code === 'auth/network-request-failed') msgErro = 'Erro de rede. Verifique a sua ligação à internet.';
-
                     setError(msgErro);
                 } finally {
                     setLoading(false);
@@ -130,9 +123,7 @@
                             <h1 className="text-4xl font-black text-white tracking-tighter mb-2">FIN<span className="text-green-500">HUB</span></h1>
                             <p className="text-zinc-400 text-sm">{isLogin ? 'Bem-vindo de volta' : 'Crie a sua conta familiar'}</p>
                         </div>
-                        
                         {error && <div className="bg-red-500/10 border border-red-500/50 text-red-500 text-sm p-3 rounded-lg mb-4 text-center">{error}</div>}
-
                         <form onSubmit={handleSubmit} className="space-y-4">
                             {!isLogin && (
                                 <div>
@@ -204,13 +195,11 @@
                         <h2 className="text-2xl font-bold text-white mb-1">Configurações</h2>
                         <p className="text-zinc-400 text-sm">Faça a gestão da sua conta e personalize categorias.</p>
                     </div>
-                    
                     {msg.text && (
                         <div className={`p-3 rounded-lg text-sm border ${msg.type === 'error' ? 'bg-red-500/10 border-red-500/50 text-red-500' : 'bg-green-500/10 border-green-500/50 text-green-500'}`}>
                             {msg.text}
                         </div>
                     )}
-
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl h-fit">
                             <h3 className="text-white font-medium mb-6 flex items-center"><UserIcon size={18} className="mr-2 text-green-500"/> Dados da Conta</h3>
@@ -329,7 +318,16 @@
             const [editingId, setEditingId] = useState(null);
             const incomeCategories = ['Salário', 'Fonte diversa'];
 
-            const defaultForm = { type: 'expense', description: '', amount: '', category: expenseCategories[0] || 'Outros', isInstallment: false, installmentsCount: 2 };
+            const defaultForm = { 
+                type: 'expense', 
+                description: '', 
+                amount: '', 
+                category: expenseCategories[0] || 'Outros', 
+                isInstallment: false, 
+                installmentsCount: 2,
+                isRecurring: false,
+                recurringEndPeriod: ''
+            };
             const [formData, setFormData] = useState(defaultForm);
 
             const activeCategoryList = formData.type === 'income' ? incomeCategories : expenseCategories;
@@ -339,7 +337,6 @@
             const totalIncome = currentMonthPlans.reduce((acc, curr) => curr.type === 'income' ? acc + curr.amount : acc, 0);
             const balance = totalIncome - totalExpense;
 
-            // Garantir que selectedPeriod é válido quando availablePeriods muda
             useEffect(() => {
                 if (!availablePeriods.includes(selectedPeriod)) {
                     setSelectedPeriod(availablePeriods[0] || currentYearMonth);
@@ -356,7 +353,10 @@
 
             const handleEdit = (item) => {
                 setEditingId(item.id);
-                setFormData({ type: item.type, description: item.description, amount: item.amount, category: item.category, isInstallment: false, installmentsCount: 2 });
+                setFormData({ 
+                    type: item.type, description: item.description, amount: item.amount, category: item.category, 
+                    isInstallment: false, installmentsCount: 2, isRecurring: false, recurringEndPeriod: '' 
+                });
             };
 
             const handleDelete = async (id) => {
@@ -375,7 +375,9 @@
 
                 if (editingId) {
                     try {
-                        await updateDoc(doc(db, 'users', user.uid, 'plannedTransactions', editingId), { ...formData, amount: baseAmount, period: selectedPeriod });
+                        await updateDoc(doc(db, 'users', user.uid, 'plannedTransactions', editingId), { 
+                            type: formData.type, category: formData.category, description: formData.description, amount: baseAmount, period: selectedPeriod 
+                        });
                         setEditingId(null);
                         setFormData(defaultForm);
                     } catch (err) {
@@ -386,8 +388,32 @@
                 }
 
                 try {
-                    if (formData.isInstallment && formData.installmentsCount > 1 && formData.type === 'expense') {
-                        const batch = writeBatch(db);
+                    const batch = writeBatch(db);
+                    
+                    // Lógica para Despesa/Receita Recorrente
+                    if (formData.isRecurring) {
+                        if (!formData.recurringEndPeriod || formData.recurringEndPeriod < selectedPeriod) {
+                            alert("Por favor, selecione um mês final válido para o lançamento recorrente (igual ou posterior ao mês selecionado).");
+                            return;
+                        }
+                        
+                        let currentIter = selectedPeriod;
+                        let iterCount = 0;
+                        
+                        while (currentIter <= formData.recurringEndPeriod && iterCount < 120) { // Trava de segurança: max 10 anos
+                            const newId = Date.now().toString() + iterCount;
+                            const docRef = doc(db, 'users', user.uid, 'plannedTransactions', newId);
+                            batch.set(docRef, {
+                                type: formData.type, category: formData.category, amount: baseAmount, period: currentIter,
+                                description: formData.description, isInstallment: false, isRecurring: true
+                            });
+                            currentIter = addMonthsToPeriod(currentIter, 1);
+                            iterCount++;
+                        }
+                        await batch.commit();
+
+                    // Lógica para Compra Parcelada
+                    } else if (formData.isInstallment && formData.installmentsCount > 1 && formData.type === 'expense') {
                         for (let i = 0; i < formData.installmentsCount; i++) {
                             const targetPeriod = addMonthsToPeriod(selectedPeriod, i);
                             const newId = Date.now().toString() + i;
@@ -398,12 +424,15 @@
                             });
                         }
                         await batch.commit();
+
+                    // Lógica para Lançamento Único
                     } else {
                         const newId = Date.now().toString();
                         await setDoc(doc(db, 'users', user.uid, 'plannedTransactions', newId), {
-                            type: formData.type, category: formData.category, amount: baseAmount, period: selectedPeriod, description: formData.description, isInstallment: false
+                            type: formData.type, category: formData.category, amount: baseAmount, period: selectedPeriod, description: formData.description, isInstallment: false, isRecurring: false
                         });
                     }
+                    
                     setFormData(defaultForm);
                 } catch (err) {
                     console.error("Erro ao gravar novo lançamento:", err);
@@ -441,6 +470,13 @@
                             <form onSubmit={handleSubmit} className="space-y-4">
                                 <div className="grid grid-cols-2 gap-2">
                                     <div>
+                                        <label className="block text-xs text-zinc-400 mb-1">Tipo</label>
+                                        <select className={`w-full bg-black border border-zinc-800 text-white rounded-lg p-2 text-sm outline-none focus:border-green-500 ${formData.type === 'income' ? 'text-green-400' : 'text-red-400'}`} value={formData.type} onChange={e => handleTypeChange(e.target.value)}>
+                                            <option value="expense">Despesa</option>
+                                            <option value="income">Receita</option>
+                                        </select>
+                                    </div>
+                                    <div>
                                         <label className="block text-xs text-zinc-400 mb-1">Valor (R$)</label>
                                         <input type="number" step="0.01" required placeholder="0.00" className="w-full bg-black border border-zinc-800 text-white rounded-lg p-2 text-sm focus:border-green-500 outline-none" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} />
                                     </div>
@@ -455,20 +491,47 @@
                                         {activeCategoryList.map(c => <option key={c} value={c}>{c}</option>)}
                                     </select>
                                 </div>
-                                {!editingId && formData.type === 'expense' && (
-                                    <div className="pt-2">
-                                        <label className="flex items-center space-x-2 text-sm text-zinc-300 cursor-pointer">
-                                            <input type="checkbox" className="rounded bg-zinc-800 border-zinc-700 text-green-500 focus:ring-green-500" checked={formData.isInstallment} onChange={e => setFormData({...formData, isInstallment: e.target.checked})} />
-                                            <span>Compra parcelada?</span>
-                                        </label>
-                                        {formData.isInstallment && (
+
+                                {!editingId && (
+                                    <div className="pt-2 space-y-3 border-t border-zinc-800 mt-4">
+                                        
+                                        {/* Compra Parcelada - Apenas para despesas */}
+                                        {formData.type === 'expense' && (
+                                            <label className="flex items-center space-x-2 text-sm text-zinc-300 cursor-pointer">
+                                                <input type="checkbox" className="rounded bg-zinc-800 border-zinc-700 text-green-500 focus:ring-green-500" 
+                                                    checked={formData.isInstallment} 
+                                                    onChange={e => setFormData({...formData, isInstallment: e.target.checked, isRecurring: false})} />
+                                                <span>Compra parcelada?</span>
+                                            </label>
+                                        )}
+                                        
+                                        {formData.isInstallment && formData.type === 'expense' && (
                                             <div className="bg-black p-3 rounded-lg border border-zinc-800 mt-2">
                                                 <label className="block text-xs text-zinc-400 mb-1">Quantidade de Meses</label>
                                                 <input type="number" min="2" max="48" className="w-full bg-zinc-900 border border-zinc-700 text-white rounded-lg p-2 text-sm outline-none" value={formData.installmentsCount} onChange={e => setFormData({...formData, installmentsCount: parseInt(e.target.value)})} />
                                             </div>
                                         )}
+
+                                        {/* Lançamento Recorrente - Despesas ou Receitas */}
+                                        <label className="flex items-center space-x-2 text-sm text-zinc-300 cursor-pointer">
+                                            <input type="checkbox" className="rounded bg-zinc-800 border-zinc-700 text-green-500 focus:ring-green-500" 
+                                                checked={formData.isRecurring} 
+                                                onChange={e => setFormData({...formData, isRecurring: e.target.checked, isInstallment: false, recurringEndPeriod: formData.recurringEndPeriod || addMonthsToPeriod(selectedPeriod, 11)})} />
+                                            <span>Lançamento recorrente? (Ex: Aluguel)</span>
+                                        </label>
+
+                                        {formData.isRecurring && (
+                                            <div className="bg-black p-3 rounded-lg border border-zinc-800 mt-2">
+                                                <label className="block text-xs text-zinc-400 mb-1">Repetir até qual mês?</label>
+                                                <input type="month" required className="w-full bg-zinc-900 border border-zinc-700 text-white rounded-lg p-2 text-sm outline-none focus:border-green-500" 
+                                                    value={formData.recurringEndPeriod} 
+                                                    min={selectedPeriod}
+                                                    onChange={e => setFormData({...formData, recurringEndPeriod: e.target.value})} />
+                                            </div>
+                                        )}
                                     </div>
                                 )}
+
                                 <div className="flex space-x-2 pt-2">
                                     {editingId && <button type="button" onClick={() => { setEditingId(null); setFormData(defaultForm); }} className="w-1/3 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-bold py-2 rounded-lg transition-colors border border-zinc-700">Cancelar</button>}
                                     <button type="submit" className={`flex-1 text-white text-sm font-bold py-2 rounded-lg transition-colors ${editingId ? 'bg-blue-600 hover:bg-blue-500' : 'bg-green-600 hover:bg-green-500'}`}>
@@ -506,7 +569,10 @@
                                                         {item.type === 'income' ? <TrendingUp size={16} /> : <Tag size={16} />}
                                                     </div>
                                                     <div>
-                                                        <p className="text-sm font-medium text-white">{item.description}</p>
+                                                        <p className="text-sm font-medium text-white">
+                                                            {item.description}
+                                                            {item.isRecurring && <span className="ml-2 text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">Recorrente</span>}
+                                                        </p>
                                                         <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{item.category}</p>
                                                     </div>
                                                 </div>
